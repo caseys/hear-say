@@ -17,17 +17,26 @@ npm install hear-say
 ## API
 
 ```ts
-import { say, hear } from 'hear-say';
+import { say, interrupt, hear } from 'hear-say';
 ```
 
-### `say(text: string | false): void`
+### `say(text: string | false): Promise<void>`
 
-Text-to-speech using the macOS `say` command.
+Queue text-to-speech using the macOS `say` command. Returns a promise that resolves when the specific text finishes speaking.
 
 ```ts
-say("Hello world");  // speak text
-say("Something else");  // stops previous, speaks new text
-say(false);  // stop speaking
+await say("Hello world");  // speak text, wait for completion
+say("More text");          // queues after previous (does not interrupt)
+say(false);                // stop speaking and clear queue
+```
+
+### `interrupt(text: string): Promise<void>`
+
+Interrupt any current speech and speak new text immediately. Clears the queue.
+
+```ts
+say("Hello world");
+interrupt("Something urgent");  // stops "Hello world", speaks this instead
 ```
 
 ### `hear(callback: ((text: string, stop: () => void) => void) | false, timeoutMs?: number): void`

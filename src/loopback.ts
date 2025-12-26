@@ -32,8 +32,14 @@ export async function loopback(text: string, timeoutMs: number = 1200): Promise<
     // Drain stderr
     hearProc.stderr?.resume();
 
+    let resolved = false;
+
     // Handle hear errors
     hearProc.on('error', () => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      say(false); // Stop any in-flight TTS
       resolve('');
     });
 
@@ -48,6 +54,8 @@ export async function loopback(text: string, timeoutMs: number = 1200): Promise<
     };
 
     const finish = (): void => {
+      if (resolved) return;
+      resolved = true;
       const result = lastLine;
       cleanup();
       resolve(result);
@@ -80,6 +88,8 @@ export async function loopback(text: string, timeoutMs: number = 1200): Promise<
 
     hearProc.on('exit', () => {
       // If hear exits unexpectedly, return what we have
+      if (resolved) return;
+      resolved = true;
       if (silenceTimer) {
         clearTimeout(silenceTimer);
       }

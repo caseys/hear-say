@@ -3,11 +3,17 @@ import { spawn, ChildProcess } from 'node:child_process';
 let activeProcess: ChildProcess | undefined;
 let lastSpoken: string = '';
 let speaking: boolean = false;
-let onSpeakingDone: (() => void) | undefined;
-let onSpeakingStart: (() => void) | undefined;
 
-// Queue for pending speech
-const speechQueue: string[] = [];
+// Event listeners (supports multiple)
+const startListeners: Array<() => void> = [];
+const finishListeners: Array<() => void> = [];
+
+// Queue entries with their resolvers
+interface QueueEntry {
+  text: string;
+  resolve: () => void;
+}
+const speechQueue: QueueEntry[] = [];
 let processingQueue = false;
 
 function killProcess(proc: ChildProcess): void {
@@ -17,6 +23,18 @@ function killProcess(proc: ChildProcess): void {
       proc.kill('SIGKILL');
     }
   }, 100);
+}
+
+function emitStart(): void {
+  for (const listener of startListeners) {
+    listener();
+  }
+}
+
+function emitFinish(): void {
+  for (const listener of finishListeners) {
+    listener();
+  }
 }
 
 /**
@@ -54,57 +72,81 @@ function speakOne(text: string): Promise<void> {
 
 /**
  * Process the speech queue sequentially.
- * Only fires onSpeakingStart when queue processing begins,
- * and onSpeakingDone when queue is fully empty.
+ * Fires start event when processing begins, finish event when queue empties.
  */
 async function processQueue(): Promise<void> {
   if (processingQueue) return;
   processingQueue = true;
   speaking = true;
-  onSpeakingStart?.();
+  emitStart();
 
   while (speechQueue.length > 0) {
-    const text = speechQueue.shift()!;
-    await speakOne(text);
+    const entry = speechQueue.shift()!;
+    await speakOne(entry.text);
+    entry.resolve();
   }
 
   speaking = false;
   processingQueue = false;
-  onSpeakingDone?.();
+  emitFinish();
 }
 
 /**
- * Queue text to be spoken. Returns a promise that resolves when this text finishes.
+ * Queue text to be spoken. Returns a promise that resolves when THIS text finishes.
  * Pass false to stop all speech and clear the queue.
  */
 export function say(text: string | false): Promise<void> {
   // If false, stop everything and clear queue
   if (text === false) {
-    speechQueue.length = 0; // Clear queue
+    // Resolve all pending promises before clearing
+    for (const entry of speechQueue) {
+      entry.resolve();
+    }
+    speechQueue.length = 0;
     if (activeProcess) {
       killProcess(activeProcess);
       activeProcess = undefined;
+    }
+    if (speaking) {
       speaking = false;
+      processingQueue = false;
+      emitFinish();
     }
     return Promise.resolve();
   }
 
-  // Add to queue and start processing
-  speechQueue.push(text);
-
-  // Return a promise that resolves when this specific text is spoken
+  // Add to queue with its own resolver
   return new Promise((resolve) => {
-    const checkDone = (): void => {
-      // If queue is empty and not speaking, we're done
-      if (speechQueue.length === 0 && !speaking) {
-        resolve();
-      } else {
-        // Check again soon
-        setTimeout(checkDone, 50);
-      }
-    };
+    speechQueue.push({ text, resolve });
+    processQueue();
+  });
+}
 
-    processQueue().then(checkDone);
+/**
+ * Interrupt current speech and speak new text immediately.
+ * Clears the queue and stops any current speech before speaking.
+ */
+export function interrupt(text: string): Promise<void> {
+  // Clear queue and resolve pending promises
+  for (const entry of speechQueue) {
+    entry.resolve();
+  }
+  speechQueue.length = 0;
+
+  // Kill current process if speaking
+  if (activeProcess) {
+    killProcess(activeProcess);
+    activeProcess = undefined;
+  }
+
+  // Reset state
+  speaking = false;
+  processingQueue = false;
+
+  // Now queue the new text
+  return new Promise((resolve) => {
+    speechQueue.push({ text, resolve });
+    processQueue();
   });
 }
 
@@ -116,12 +158,32 @@ export function isSpeaking(): boolean {
   return speaking;
 }
 
-export function onSayStarted(callback: () => void): void {
-  onSpeakingStart = callback;
+/**
+ * Register a callback for when speech starts.
+ * Returns a function to unregister the listener.
+ */
+export function onSayStarted(callback: () => void): () => void {
+  startListeners.push(callback);
+  return () => {
+    const index = startListeners.indexOf(callback);
+    if (index !== -1) {
+      startListeners.splice(index, 1);
+    }
+  };
 }
 
-export function onSayFinished(callback: () => void): void {
-  onSpeakingDone = callback;
+/**
+ * Register a callback for when speech finishes.
+ * Returns a function to unregister the listener.
+ */
+export function onSayFinished(callback: () => void): () => void {
+  finishListeners.push(callback);
+  return () => {
+    const index = finishListeners.indexOf(callback);
+    if (index !== -1) {
+      finishListeners.splice(index, 1);
+    }
+  };
 }
 
 // Cleanup on process exit
