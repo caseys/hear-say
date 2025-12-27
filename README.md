@@ -17,7 +17,7 @@ npm install hear-say
 ## API
 
 ```ts
-import { say, interrupt, hear, loopback } from 'hear-say';
+import { say, interrupt, raiseHand, hear, loopback } from 'hear-say';
 ```
 
 ### `say(text: string | false): Promise<void>`
@@ -38,6 +38,19 @@ Interrupt any current speech and speak new text immediately. Clears the queue.
 say("Hello world");
 interrupt("Something urgent");  // stops "Hello world", speaks this instead
 ```
+
+### `raiseHand(text: string): Promise<void>`
+
+Wait for current speech to finish, then speak. If called multiple times while waiting, only the latest text is spoken.
+
+```ts
+say("Long explanation...");
+raiseHand("I have a question");  // waits for say() to finish, then speaks
+raiseHand("Actually, different question");  // replaces previous raiseHand
+// Only "Actually, different question" will be spoken after "Long explanation..."
+```
+
+Useful when you want to queue a response without interrupting, but don't need to queue multiple items (newer calls supersede previous ones).
 
 ### `hear(callback, timeoutMs?): void`
 

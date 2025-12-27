@@ -1,3 +1,3 @@
-export { say, interrupt, getLastSpoken, isSpeaking, onSayStarted, onSayFinished } from './say.js';
+export { say, interrupt, raiseHand, getLastSpoken, isSpeaking, onSayStarted, onSayFinished } from './say.js';
 export { hear } from './hear.js';
 export { loopback } from './loopback.js';

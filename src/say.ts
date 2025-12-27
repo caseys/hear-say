@@ -16,6 +16,9 @@ interface QueueEntry {
 const speechQueue: QueueEntry[] = [];
 let processingQueue = false;
 
+// Pending raiseHand entry (only one, newer calls replace)
+let pendingRaiseHand: QueueEntry | undefined;
+
 function killProcess(proc: ChildProcess): void {
   proc.kill('SIGINT');
   setTimeout(() => {
@@ -80,10 +83,21 @@ async function processQueue(): Promise<void> {
   speaking = true;
   emitStart();
 
-  while (speechQueue.length > 0) {
-    const entry = speechQueue.shift()!;
-    await speakOne(entry.text);
-    entry.resolve();
+  while (speechQueue.length > 0 || pendingRaiseHand) {
+    // Process regular queue first
+    while (speechQueue.length > 0) {
+      const entry = speechQueue.shift()!;
+      await speakOne(entry.text);
+      entry.resolve();
+    }
+
+    // Then handle pending raiseHand if any
+    if (pendingRaiseHand) {
+      const entry = pendingRaiseHand;
+      pendingRaiseHand = undefined;
+      await speakOne(entry.text);
+      entry.resolve();
+    }
   }
 
   speaking = false;
@@ -147,6 +161,32 @@ export function interrupt(text: string): Promise<void> {
   return new Promise((resolve) => {
     speechQueue.push({ text, resolve });
     processQueue();
+  });
+}
+
+/**
+ * Wait for current speech to finish, then speak.
+ * If called multiple times while waiting, only the latest text is spoken.
+ * Returns a promise that resolves when this text finishes speaking,
+ * or immediately if superseded by another raiseHand call.
+ */
+export function raiseHand(text: string): Promise<void> {
+  // If nothing speaking and queue empty, just speak immediately
+  if (!speaking && speechQueue.length === 0 && !pendingRaiseHand) {
+    return new Promise((resolve) => {
+      speechQueue.push({ text, resolve });
+      processQueue();
+    });
+  }
+
+  // Resolve previous pending raiseHand (it's being superseded)
+  if (pendingRaiseHand) {
+    pendingRaiseHand.resolve();
+  }
+
+  // Set new pending raiseHand
+  return new Promise((resolve) => {
+    pendingRaiseHand = { text, resolve };
   });
 }
 
