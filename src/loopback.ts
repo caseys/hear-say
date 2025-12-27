@@ -16,9 +16,14 @@ function killProcess(proc: ChildProcess): void {
  *
  * @param text - The text to speak
  * @param timeoutMs - Silence timeout in ms after TTS finishes (default: 1200)
+ * @param onLine - Optional callback for each line (text, final) - matches hear() pattern
  * @returns The transcribed text (empty string if nothing heard)
  */
-export async function loopback(text: string, timeoutMs: number = 1200): Promise<string> {
+export async function loopback(
+  text: string,
+  timeoutMs: number = 1200,
+  onLine?: (text: string, final: boolean) => void
+): Promise<string> {
   return new Promise((resolve) => {
     let lastLine = '';
     let silenceTimer: NodeJS.Timeout | undefined;
@@ -58,6 +63,7 @@ export async function loopback(text: string, timeoutMs: number = 1200): Promise<
       resolved = true;
       const result = lastLine;
       cleanup();
+      onLine?.(result, true);
       resolve(result);
     };
 
@@ -82,6 +88,7 @@ export async function loopback(text: string, timeoutMs: number = 1200): Promise<
         if (line.trim()) {
           lastLine = line;
           resetSilenceTimer();
+          onLine?.(line, false);
         }
       }
     });

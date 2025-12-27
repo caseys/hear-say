@@ -9,7 +9,7 @@ function debug(...arguments_: unknown[]): void {
   }
 }
 
-type Callback = (text: string, stop: () => void) => void;
+type Callback = (text: string, stop: () => void, final: boolean) => void;
 
 let activeProcess: ChildProcess | undefined;
 let currentCallback: Callback | undefined;
@@ -149,6 +149,12 @@ function cleanup(): void {
   lastLine = '';
 }
 
+/** Shared stop function passed to callbacks */
+function stopListening(): void {
+  shouldRestart = false;
+  cleanup();
+}
+
 function resetSilenceTimer(): void {
   clearSilenceTimer();
 
@@ -185,14 +191,8 @@ function onSilence(): void {
     killProcess(activeProcess);
   }
 
-  // Create stop function
-  const stop = () => {
-    shouldRestart = false;  // Prevent restart if already in progress
-    cleanup();
-  };
-
-  // Invoke callback - new process is already spawning
-  callback(text, stop);
+  // Invoke callback with final=true - new process is already spawning
+  callback(text, stopListening, true);
 }
 
 function startListening(): void {
@@ -227,6 +227,10 @@ function startListening(): void {
       if (line.trim()) {
         lastLine = line;
         resetSilenceTimer();
+        // Call callback for each line with final=false
+        if (currentCallback) {
+          currentCallback(line, stopListening, false);
+        }
       }
     }
   });

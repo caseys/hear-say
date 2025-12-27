@@ -17,7 +17,7 @@ npm install hear-say
 ## API
 
 ```ts
-import { say, interrupt, hear } from 'hear-say';
+import { say, interrupt, hear, loopback } from 'hear-say';
 ```
 
 ### `say(text: string | false): Promise<void>`
@@ -39,25 +39,65 @@ say("Hello world");
 interrupt("Something urgent");  // stops "Hello world", speaks this instead
 ```
 
-### `hear(callback: ((text: string, stop: () => void) => void) | false, timeoutMs?: number): void`
+### `hear(callback, timeoutMs?): void`
 
-Speech-to-text using the `hear` CLI with automatic silence detection.
+Speech-to-text using the `hear` CLI with streaming and silence detection.
 
 ```ts
-hear((text, stop) => {
-  console.log("You said:", text);
-  // call stop() to stop listening
-  // otherwise, automatically restarts for next utterance
-}, 1600);  // 1600ms silence timeout (default)
+hear((text, stop, final) => {
+  if (final) {
+    console.log("Final:", text);
+    // Complete utterance after silence timeout
+  } else {
+    console.log("Streaming:", text);
+    // Real-time updates as speech is recognized
+  }
+}, 1600);  // 1600ms silence timeout (default: 1200)
 
 hear(false);  // stop listening
 ```
 
-**Behavior:**
-- Accumulates text until silence (no output for `timeoutMs`)
-- Callback receives the final accumulated text
+#### Callback Arguments
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `text` | `string` | The recognized speech text |
+| `stop` | `() => void` | Call to stop listening entirely |
+| `final` | `boolean` | `true` after silence timeout, `false` for streaming updates |
+
+#### Behavior
+
+- Callback fires for every line from the hear CLI (`final=false`)
+- After silence timeout, callback fires once more with `final=true`
 - Callback is hot-swappable: call `hear(newFn)` to replace without restarting
-- After each utterance, the process restarts automatically unless `stop()` is called
+- After each final utterance, the process restarts automatically unless `stop()` is called
+
+### `loopback(text, timeoutMs?, onLine?): Promise<string>`
+
+Speak text via TTS and return what STT transcribes. Used for testing STT accuracy.
+
+```ts
+// Basic usage
+const heard = await loopback("Hello world");
+console.log("Heard:", heard);
+
+// With streaming callback
+const heard = await loopback("Hello world", 1200, (text, final) => {
+  if (final) {
+    console.log("Final:", text);
+  } else {
+    console.log("Streaming:", text);
+  }
+});
+```
+
+#### Arguments
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `text` | `string` | The text to speak |
+| `timeoutMs` | `number` | Silence timeout in ms (default: 1200) |
+| `onLine` | `(text: string, final: boolean) => void` | Optional streaming callback |
 
 ## License
 
