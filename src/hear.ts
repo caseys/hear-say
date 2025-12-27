@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from 'node:child_process';
-import { getLastSpoken, isSpeaking, onSayStarted, onSayFinished } from './say.js';
+import { isSpeaking, onSayStarted, onSayFinished } from './say.js';
 
 const DEBUG = process.env.HEAR_SAY_DEBUG === '1' || process.env.HEAR_SAY_DEBUG === 'true';
 
@@ -25,108 +25,6 @@ function killProcess(proc: ChildProcess): void {
       proc.kill('SIGKILL');
     }
   }, 100);
-}
-
-function normalize(s: string): string {
-  return s.toLowerCase().replaceAll(/[^\w\s]/g, '').trim();
-}
-
-const MATCH_THRESHOLD = 0.7;
-const BOUNDARY_WORDS = 3; // Last N words must match at TTS/user boundary
-
-// Check if spokenTokens appear as a subsequence in heardSlice
-// Returns which spoken indices were matched
-function findSubsequenceMatches(spokenTokens: string[], heardSlice: string[]): Set<number> {
-  const matched = new Set<number>();
-  if (spokenTokens.length === 0) return matched;
-
-  let spokenIndex = 0;
-  for (const heardToken of heardSlice) {
-    if (heardToken === spokenTokens[spokenIndex]) {
-      matched.add(spokenIndex);
-      spokenIndex++;
-      if (spokenIndex === spokenTokens.length) break;
-    }
-  }
-
-  return matched;
-}
-
-// Check if the boundary words (last N for start match, first N for end match) are mostly matched
-function boundaryMatches(spokenTokens: string[], matched: Set<number>, atStart: boolean): boolean {
-  const boundaryCount = Math.min(BOUNDARY_WORDS, Math.ceil(spokenTokens.length / 3));
-  let boundaryHits = 0;
-
-  if (atStart) {
-    // For start match (TTS then user), check LAST words of spoken phrase
-    for (let index = spokenTokens.length - boundaryCount; index < spokenTokens.length; index++) {
-      if (matched.has(index)) boundaryHits++;
-    }
-  } else {
-    // For end match (user then TTS), check FIRST words of spoken phrase
-    for (let index = 0; index < boundaryCount; index++) {
-      if (matched.has(index)) boundaryHits++;
-    }
-  }
-
-  // Require at least 2/3 of boundary words to match
-  return boundaryHits >= Math.ceil(boundaryCount * 0.66);
-}
-
-function filterSpokenText(heard: string): string {
-  const spoken = getLastSpoken();
-  if (!spoken) return heard;
-
-  const spokenTokens = normalize(spoken).split(/\s+/);
-  const heardTokens = normalize(heard).split(/\s+/);
-  const originalWords = heard.trim().split(/\s+/);
-
-  // Allow some buffer for inserted words (e.g., "um", "uh", or STT errors)
-  const windowSize = Math.min(
-    heardTokens.length,
-    Math.ceil(spokenTokens.length * 1.3)
-  );
-
-  // Check if heard STARTS with the spoken tokens (fuzzy)
-  const startSlice = heardTokens.slice(0, windowSize);
-  const startMatched = findSubsequenceMatches(spokenTokens, startSlice);
-  const startRatio = startMatched.size / spokenTokens.length;
-
-  // Must meet threshold AND have boundary words match (last words of TTS)
-  if (startRatio >= MATCH_THRESHOLD && boundaryMatches(spokenTokens, startMatched, true)) {
-    // Find where the match actually ends in heard tokens
-    let removeCount = 0;
-    let matchIndex = 0;
-    for (let index = 0; index < heardTokens.length && matchIndex < spokenTokens.length; index++) {
-      if (heardTokens[index] === spokenTokens[matchIndex]) {
-        matchIndex++;
-      }
-      removeCount = index + 1;
-    }
-    return originalWords.slice(removeCount).join(' ');
-  }
-
-  // Check if heard ENDS with the spoken tokens (fuzzy)
-  const endStart = Math.max(0, heardTokens.length - windowSize);
-  const endSlice = heardTokens.slice(endStart);
-  const endMatched = findSubsequenceMatches(spokenTokens, endSlice);
-  const endRatio = endMatched.size / spokenTokens.length;
-
-  // Must meet threshold AND have boundary words match (first words of TTS)
-  if (endRatio >= MATCH_THRESHOLD && boundaryMatches(spokenTokens, endMatched, false)) {
-    // Find where the match starts in heard tokens (from the end)
-    let keepCount = heardTokens.length;
-    let matchIndex = spokenTokens.length - 1;
-    for (let index = heardTokens.length - 1; index >= 0 && matchIndex >= 0; index--) {
-      if (heardTokens[index] === spokenTokens[matchIndex]) {
-        matchIndex--;
-      }
-      keepCount = index;
-    }
-    return originalWords.slice(0, keepCount).join(' ');
-  }
-
-  return heard;
 }
 
 function clearSilenceTimer(): void {
@@ -174,14 +72,9 @@ function onSilence(): void {
     return;
   }
 
-  const text = filterSpokenText(lastLine);
-  debug('[hear] onSilence: raw="' + lastLine + '" filtered="' + text + '"');
+  const text = lastLine;
+  debug('[hear] onSilence: text="' + text + '"');
   const callback = currentCallback;
-
-  // If nothing left after filtering, don't fire callback
-  if (!text.trim()) {
-    return;
-  }
 
   // Reset for next utterance
   lastLine = '';
