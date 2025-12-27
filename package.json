@@ -20,7 +20,8 @@
     "lint:fix": "eslint src --fix",
     "knip": "knip",
     "test": "tsx test.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postinstall": "node -e \"if(process.platform!=='darwin')console.warn('[hear-say] Warning: This library only works on macOS.')\""
   },
   "keywords": [
     "macos",

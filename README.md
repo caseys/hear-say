@@ -4,9 +4,11 @@ A minimal macOS TypeScript library wrapping the system `say` command (text-to-sp
 
 ## Requirements
 
-- macOS
+- **macOS only** - This library uses macOS-specific binaries and will not work on other platforms
 - Node.js >= 18
 - [`hear`](https://sveinbjorn.org/hear) CLI installed (`brew install hear`)
+
+The library will warn at startup if run on a non-macOS platform or if the `hear` CLI is not found.
 
 ## Installation
 
