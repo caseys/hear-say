@@ -19,10 +19,10 @@ npm install hear-say
 ## API
 
 ```ts
-import { say, interrupt, raiseHand, hear, loopback } from 'hear-say';
+import { say, hear, loopback } from 'hear-say';
 ```
 
-### `say(text: string | false): Promise<void>`
+### `say(text: string | false, options?: SayOptions): Promise<void>`
 
 Queue text-to-speech using the macOS `say` command. Returns a promise that resolves when the specific text finishes speaking.
 
@@ -32,27 +32,33 @@ say("More text");          // queues after previous (does not interrupt)
 say(false);                // stop speaking and clear queue
 ```
 
-### `interrupt(text: string): Promise<void>`
+#### Options
 
-Interrupt any current speech and speak new text immediately. Clears the queue.
+| Option | Effect |
+|--------|--------|
+| `interrupt` | Skip to front of queue (wait for current to finish, last wins) |
+| `clear` | Clear queue and speak next (implies interrupt) |
+| `rude` | Cut off current speaker immediately |
+| `latest` | Only the last call with this flag wins (supersedes previous) |
+
+Options can be combined. For example:
+- `{ rude: true, clear: true }` - cut off speaker AND clear queue
+- `{ interrupt: true, latest: true }` - jump to front, but newer calls replace
 
 ```ts
-say("Hello world");
-interrupt("Something urgent");  // stops "Hello world", speaks this instead
+// Polite interrupt: wait for current speech, then speak next
+say("Urgent update", { interrupt: true });
+
+// Rude interrupt: cut off current speaker immediately
+say("STOP!", { rude: true });
+
+// Clear queue and speak next
+say("Starting over", { clear: true });
+
+// Latest wins: only the last call is spoken when its turn comes
+say("Status: loading...", { latest: true });
+say("Status: complete!", { latest: true });  // replaces previous
 ```
-
-### `raiseHand(text: string): Promise<void>`
-
-Wait for current speech to finish, then speak. If called multiple times while waiting, only the latest text is spoken.
-
-```ts
-say("Long explanation...");
-raiseHand("I have a question");  // waits for say() to finish, then speaks
-raiseHand("Actually, different question");  // replaces previous raiseHand
-// Only "Actually, different question" will be spoken after "Long explanation..."
-```
-
-Useful when you want to queue a response without interrupting, but don't need to queue multiple items (newer calls supersede previous ones).
 
 ### `hear(callback, timeoutMs?): void`
 
@@ -113,6 +119,90 @@ const heard = await loopback("Hello world", 1200, (text, final) => {
 | `text` | `string` | The text to speak |
 | `timeoutMs` | `number` | Silence timeout in ms (default: 1200) |
 | `onLine` | `(text: string, final: boolean) => void` | Optional streaming callback |
+
+## Configuration
+
+Environment variables to customize behavior:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VOICE` | (system default) | macOS voice name (e.g., "Samantha", "Alex") |
+| `MIN_RATE` | 230 | Minimum speech rate in words per minute |
+| `MAX_RATE` | 370 | Maximum speech rate (used when queue is long) |
+| `WORD_QUEUE_PLATEAU` | 15 | Words in queue to reach max rate |
+| `SAY_QUEUE_BREAK` | 2 | Gap between queue items in seconds (allows hearing) |
+| `HEAR_SAY_DEBUG` | (off) | Set to "1" to enable debug logging |
+
+Example:
+```bash
+VOICE=Samantha MIN_RATE=200 MAX_RATE=400 node your-app.js
+```
+
+## Advanced API
+
+Additional exports for advanced use cases:
+
+```ts
+import {
+  getLastSpoken,
+  isSpeaking,
+  setDebug,
+  setGapDuration,
+  onSayStarted,
+  onSayFinished,
+  onSayGapStart,
+  onSayGapEnd,
+  signalGapSpeechComplete
+} from 'hear-say';
+```
+
+### State & Debug
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `getLastSpoken()` | `string` | The last text that was spoken |
+| `isSpeaking()` | `boolean` | Whether TTS is currently active |
+| `setDebug(enabled)` | `void` | Enable/disable debug logging at runtime |
+
+```ts
+import { setDebug } from 'hear-say';
+
+// Enable debug logging (same as HEAR_SAY_DEBUG=1)
+setDebug(true);
+
+// Tools can expose this to their users however they want
+if (args.verbose) {
+  setDebug(true);
+}
+```
+
+### Gap Control
+
+Between each queued speech item, there's a configurable gap (default 2s) that allows the `hear` system to capture user speech. This enables conversational turn-taking.
+
+| Function | Description |
+|----------|-------------|
+| `setGapDuration(ms)` | Set gap duration in milliseconds (0 to disable) |
+| `signalGapSpeechComplete()` | End gap early (e.g., when user speech is captured) |
+
+### Events
+
+Register callbacks for speech lifecycle events. Each returns an unregister function.
+
+```ts
+const unregister = onSayStarted(() => {
+  console.log("Speech started");
+});
+
+// Later: unregister();
+```
+
+| Function | Fires when |
+|----------|------------|
+| `onSayStarted(cb)` | Speech queue begins processing |
+| `onSayFinished(cb)` | Speech queue is empty |
+| `onSayGapStart(cb)` | Gap begins between queue items |
+| `onSayGapEnd(cb)` | Gap ends, speech resuming |
 
 ## License
 

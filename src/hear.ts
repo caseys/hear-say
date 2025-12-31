@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
-import { isSpeaking, onSayStarted, onSayFinished } from './say.js';
+import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete } from './say.js';
+import { killProcess } from './utilities.js';
 
 const DEBUG = process.env.HEAR_SAY_DEBUG === '1' || process.env.HEAR_SAY_DEBUG === 'true';
 
@@ -14,18 +15,14 @@ type Callback = (text: string, stop: () => void, final: boolean) => void;
 let activeProcess: ChildProcess | undefined;
 let currentCallback: Callback | undefined;
 let silenceTimer: NodeJS.Timeout | undefined;
-let lastLine: string = '';
+let lastTranscribedText: string = '';
 let timeoutDuration: number = 1200;
-let shouldRestart: boolean = false;
+let shouldContinueListening: boolean = false;
+let inGap: boolean = false;
 
-function killProcess(proc: ChildProcess): void {
-  proc.kill('SIGINT');
-  setTimeout(() => {
-    if (!proc.killed) {
-      proc.kill('SIGKILL');
-    }
-  }, 100);
-}
+// Gap listener unregister functions (only registered when hear() is active)
+let unregisterGapStart: (() => void) | undefined;
+let unregisterGapEnd: (() => void) | undefined;
 
 function clearSilenceTimer(): void {
   if (silenceTimer) {
@@ -35,7 +32,7 @@ function clearSilenceTimer(): void {
 }
 
 function cleanup(): void {
-  shouldRestart = false;
+  shouldContinueListening = false;
   currentCallback = undefined;
   clearSilenceTimer();
 
@@ -44,12 +41,22 @@ function cleanup(): void {
     activeProcess = undefined;
   }
 
-  lastLine = '';
+  lastTranscribedText = '';
+
+  // Unregister gap listeners
+  if (unregisterGapStart) {
+    unregisterGapStart();
+    unregisterGapStart = undefined;
+  }
+  if (unregisterGapEnd) {
+    unregisterGapEnd();
+    unregisterGapEnd = undefined;
+  }
 }
 
 /** Shared stop function passed to callbacks */
 function stopListening(): void {
-  shouldRestart = false;
+  shouldContinueListening = false;
   cleanup();
 }
 
@@ -62,9 +69,9 @@ function resetSilenceTimer(): void {
 }
 
 function onSilence(): void {
-  debug('[hear] onSilence: lastLine?', !!lastLine, 'currentCallback?', !!currentCallback);
+  debug('[hear] onSilence: lastTranscribedText?', !!lastTranscribedText, 'currentCallback?', !!currentCallback);
   // Only fire if we have accumulated text and a callback
-  if (!lastLine || !currentCallback) {
+  if (!lastTranscribedText || !currentCallback) {
     // Keep timer running if we're still listening
     if (currentCallback && activeProcess) {
       resetSilenceTimer();
@@ -72,26 +79,32 @@ function onSilence(): void {
     return;
   }
 
-  const text = lastLine;
+  const text = lastTranscribedText;
   debug('[hear] onSilence: text="' + text + '"');
   const callback = currentCallback;
 
   // Reset for next utterance
-  lastLine = '';
+  lastTranscribedText = '';
 
   // Kill process first to start respawn immediately (runs in parallel with callback)
-  if (shouldRestart && activeProcess) {
+  if (shouldContinueListening && activeProcess) {
     killProcess(activeProcess);
   }
 
   // Invoke callback with final=true - new process is already spawning
   callback(text, stopListening, true);
+
+  // If we're in a gap and speech was captured, signal completion
+  if (inGap) {
+    debug('[hear] signaling gap speech complete');
+    signalGapSpeechComplete();
+  }
 }
 
 function startListening(): void {
   debug('[hear] startListening called');
-  lastLine = '';
-  shouldRestart = true;
+  lastTranscribedText = '';
+  shouldContinueListening = true;
 
   activeProcess = spawn('hear', [], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -118,7 +131,7 @@ function startListening(): void {
 
     for (const line of lines) {
       if (line.trim()) {
-        lastLine = line;
+        lastTranscribedText = line;
         resetSilenceTimer();
         // Call callback for each line with final=false
         if (currentCallback) {
@@ -133,7 +146,7 @@ function startListening(): void {
     clearSilenceTimer();
 
     // Restart if we should and have a callback
-    if (shouldRestart && currentCallback) {
+    if (shouldContinueListening && currentCallback) {
       startListening();
     }
   });
@@ -158,6 +171,31 @@ export function hear(
   const timeoutChanged = timeoutDuration !== timeoutMs;
   timeoutDuration = timeoutMs;
   currentCallback = callback;
+
+  // Register gap listeners if not already registered
+  if (!unregisterGapStart) {
+    unregisterGapStart = onSayGapStart(() => {
+      debug('[hear] onSayGapStart: currentCallback?', !!currentCallback, 'activeProcess?', !!activeProcess);
+      inGap = true;
+      lastTranscribedText = '';
+      if (currentCallback && !activeProcess) {
+        debug('[hear] starting hear during gap');
+        startListening();
+      }
+    });
+    unregisterGapEnd = onSayGapEnd(() => {
+      debug('[hear] onSayGapEnd: activeProcess?', !!activeProcess);
+      inGap = false;
+      if (activeProcess) {
+        shouldContinueListening = false;  // Don't auto-restart
+        killProcess(activeProcess);
+        activeProcess = undefined;
+        clearSilenceTimer();
+        lastTranscribedText = '';
+        debug('[hear] killed hear process at gap end');
+      }
+    });
+  }
 
   // If already listening, just replace callback (hot-swap) and re-arm timer if timeout changed
   if (activeProcess) {
@@ -193,11 +231,11 @@ process.on('SIGTERM', () => {
 onSayStarted(() => {
   debug('[hear] onSayStarted: activeProcess?', !!activeProcess);
   if (activeProcess) {
-    shouldRestart = false;  // Don't auto-restart
+    shouldContinueListening = false;  // Don't auto-restart
     killProcess(activeProcess);
     activeProcess = undefined;
     clearSilenceTimer();
-    lastLine = '';
+    lastTranscribedText = '';
     debug('[hear] killed hear process');
   }
 });
@@ -205,7 +243,8 @@ onSayStarted(() => {
 // When TTS finishes (say process exits), start hear if callback is waiting
 onSayFinished(() => {
   debug('[hear] onSayFinished: currentCallback?', !!currentCallback, 'activeProcess?', !!activeProcess);
-  lastLine = '';
+  lastTranscribedText = '';
+  inGap = false;
   if (currentCallback && !activeProcess) {
     debug('[hear] starting hear after TTS finished');
     startListening();

@@ -1,14 +1,6 @@
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { say } from './say.js';
-
-function killProcess(proc: ChildProcess): void {
-  proc.kill('SIGINT');
-  setTimeout(() => {
-    if (!proc.killed) {
-      proc.kill('SIGKILL');
-    }
-  }, 100);
-}
+import { killProcess } from './utilities.js';
 
 /**
  * Speak text via TTS and return what STT transcribes.
@@ -21,11 +13,11 @@ function killProcess(proc: ChildProcess): void {
  */
 export async function loopback(
   text: string,
-  timeoutMs: number = 1200,
+  timeoutMs: number = 1800,
   onLine?: (text: string, final: boolean) => void
 ): Promise<string> {
   return new Promise((resolve) => {
-    let lastLine = '';
+    let lastTranscribedText = '';
     let silenceTimer: NodeJS.Timeout | undefined;
     let ttsFinished = false;
 
@@ -61,7 +53,7 @@ export async function loopback(
     const finish = (): void => {
       if (resolved) return;
       resolved = true;
-      const result = lastLine;
+      const result = lastTranscribedText;
       cleanup();
       onLine?.(result, true);
       resolve(result);
@@ -86,7 +78,7 @@ export async function loopback(
 
       for (const line of lines) {
         if (line.trim()) {
-          lastLine = line;
+          lastTranscribedText = line;
           resetSilenceTimer();
           onLine?.(line, false);
         }
@@ -100,7 +92,7 @@ export async function loopback(
       if (silenceTimer) {
         clearTimeout(silenceTimer);
       }
-      resolve(lastLine);
+      resolve(lastTranscribedText);
     });
 
     // Start TTS
