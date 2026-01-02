@@ -27,13 +27,32 @@ export function debug(prefix: string, ...arguments_: unknown[]): void {
 }
 
 /**
- * Kill a child process gracefully with SIGINT, falling back to SIGKILL.
+ * Kill a child process gracefully with SIGTERM, falling back to SIGKILL.
+ * Returns a Promise that resolves when the process actually exits.
  */
-export function killProcess(proc: ChildProcess): void {
-  proc.kill('SIGINT');
-  setTimeout(() => {
-    if (!proc.killed) {
-      proc.kill('SIGKILL');
+export function killProcess(proc: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    // If already exited, resolve immediately
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve();
+      return;
     }
-  }, 100);
+
+    // Set up exit handler
+    const onExit = () => {
+      clearTimeout(forceKillTimer);
+      resolve();
+    };
+    proc.once('exit', onExit);
+
+    // Try graceful shutdown first
+    proc.kill('SIGTERM');
+
+    // Force kill after 200ms if still running
+    const forceKillTimer = setTimeout(() => {
+      if (proc.exitCode === null && proc.signalCode === null) {
+        proc.kill('SIGKILL');
+      }
+    }, 200);
+  });
 }
