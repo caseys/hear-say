@@ -1,13 +1,10 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete } from './say.js';
-import { killProcess } from './utilities.js';
-
-const DEBUG = process.env.HEAR_SAY_DEBUG === '1' || process.env.HEAR_SAY_DEBUG === 'true';
+import { killProcess, debug as debugLog } from './utilities.js';
+import { isHearMuted } from './capslock.js';
 
 function debug(...arguments_: unknown[]): void {
-  if (DEBUG) {
-    console.log(...arguments_);
-  }
+  debugLog('[hear]', ...arguments_);
 }
 
 type Callback = (text: string, stop: () => void, final: boolean) => void;
@@ -16,7 +13,7 @@ let activeProcess: ChildProcess | undefined;
 let currentCallback: Callback | undefined;
 let silenceTimer: NodeJS.Timeout | undefined;
 let lastTranscribedText: string = '';
-let timeoutDuration: number = 1200;
+let timeoutDuration: number = 2500;
 let shouldContinueListening: boolean = false;
 let inGap: boolean = false;
 
@@ -69,7 +66,7 @@ function resetSilenceTimer(): void {
 }
 
 function onSilence(): void {
-  debug('[hear] onSilence: lastTranscribedText?', !!lastTranscribedText, 'currentCallback?', !!currentCallback);
+  debug('[hear] onSilence: lastTranscribedText?', !!lastTranscribedText, 'currentCallback?', !!currentCallback, 'muted?', isHearMuted());
   // Only fire if we have accumulated text and a callback
   if (!lastTranscribedText || !currentCallback) {
     // Keep timer running if we're still listening
@@ -89,6 +86,12 @@ function onSilence(): void {
   // Kill process first to start respawn immediately (runs in parallel with callback)
   if (shouldContinueListening && activeProcess) {
     killProcess(activeProcess);
+  }
+
+  // Skip callback if muted (Caps Lock active)
+  if (isHearMuted()) {
+    debug('[hear] onSilence: muted, discarding text');
+    return;
   }
 
   // Invoke callback with final=true - new process is already spawning
@@ -133,8 +136,8 @@ function startListening(): void {
       if (line.trim()) {
         lastTranscribedText = line;
         resetSilenceTimer();
-        // Call callback for each line with final=false
-        if (currentCallback) {
+        // Call callback for each line with final=false (skip if muted)
+        if (currentCallback && !isHearMuted()) {
           currentCallback(line, stopListening, false);
         }
       }
@@ -157,7 +160,7 @@ function startListening(): void {
 
 export function hear(
   callback: Callback | false,
-  timeoutMs: number = 1200
+  timeoutMs: number = 2500
 ): void {
   debug('[hear] hear() called: callback?', callback !== false, 'activeProcess?', !!activeProcess, 'isSpeaking?', isSpeaking());
 

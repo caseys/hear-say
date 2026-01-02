@@ -1,19 +1,11 @@
 import { spawn, ChildProcess } from 'node:child_process';
-import { killProcess } from './utilities.js';
+import { killProcess, debug as debugLog } from './utilities.js';
 
-let debug_enabled = process.env.HEAR_SAY_DEBUG === '1' || process.env.HEAR_SAY_DEBUG === 'true';
+// Re-export setDebug for public API
+export { setDebug } from './utilities.js';
 
 function debug(...arguments_: unknown[]): void {
-  if (debug_enabled) {
-    console.log('[say]', ...arguments_);
-  }
-}
-
-/**
- * Enable or disable debug logging at runtime.
- */
-export function setDebug(enabled: boolean): void {
-  debug_enabled = enabled;
+  debugLog('[say]', ...arguments_);
 }
 
 let activeProcess: ChildProcess | undefined;
@@ -43,7 +35,7 @@ let processingQueue = false;
 export interface SayOptions {
   interrupt?: boolean;  // Skip to be next in queue (wait for current to finish)
   clear?: boolean;      // Clear the queue (implies interrupt)
-  rude?: boolean;       // Cut off current speaker immediately, speak now
+  rude?: boolean;       // Cut off current speaker immediately, speak now; interrupted text is rescheduled after
   latest?: boolean;     // Only the last call with this flag wins (supersedes previous)
 }
 
@@ -62,19 +54,15 @@ const MAX_RATE = Number(process.env.MAX_RATE) || 370;
 const WORD_THRESHOLD = Number(process.env.WORD_QUEUE_PLATEAU) || 15;
 const VOICE = process.env.VOICE || '';
 
-function countQueueWords(): number {
-  let total = 0;
+function calculateRate(currentText: string): number {
+  // Count words in current text + remaining queue
+  let wordCount = currentText.split(/\s+/).filter(w => w.length > 0).length;
   for (const entry of speechQueue) {
-    total += entry.text.split(/\s+/).filter(w => w.length > 0).length;
+    wordCount += entry.text.split(/\s+/).filter(w => w.length > 0).length;
   }
-  return total;
-}
-
-function calculateRate(): number {
-  const wordCount = countQueueWords();
   const scale = Math.min(wordCount, WORD_THRESHOLD) / WORD_THRESHOLD;
   const rate = Math.round(MIN_RATE + scale * (MAX_RATE - MIN_RATE));
-  debug(`rate=${rate} (${wordCount} words in ${speechQueue.length} items)`);
+  debug(`rate=${rate} (${wordCount} words in ${speechQueue.length + 1} items)`);
   return rate;
 }
 
@@ -109,7 +97,7 @@ function emitGapEnd(): void {
 function speakOne(text: string): Promise<void> {
   return new Promise((resolve) => {
     lastSpoken = text;
-    const rate = calculateRate();
+    const rate = calculateRate(text);
 
     const sayArguments = ['-r', String(rate)];
     if (VOICE) {
@@ -256,7 +244,8 @@ async function processQueue(): Promise<void> {
  * Options:
  * - interrupt: Skip to be next in queue (wait for current to finish, last wins)
  * - clear: Clear the queue (implies interrupt)
- * - rude: Cut off current speaker immediately, speak now (combine with clear to also clear queue)
+ * - rude: Cut off current speaker immediately, speak now. Interrupted text is rescheduled
+ *         to play right after the rude text.
  * - latest: Only the last call wins. Combine with interrupt/clear to control position.
  */
 export function say(text: string | false, options?: SayOptions): Promise<void> {
@@ -306,6 +295,13 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
       // Set cancellation flag so old processQueue() exits cleanly
       queueCancelled = true;
 
+      // Capture interrupted text before killing (to reschedule after rude text)
+      let interruptedText: string | undefined;
+      if (activeProcess && lastSpoken) {
+        interruptedText = lastSpoken;
+        debug(`rude: interrupted "${interruptedText}"`);
+      }
+
       // Rude mode: kill current speech immediately, speak now
       // Only clear queue if clear option is also set
       if (sayOptions.clear) {
@@ -343,6 +339,11 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
           latestEntry = entry;
         }
         speechQueue.unshift(entry);
+        // Reschedule interrupted text right after rude text
+        if (interruptedText) {
+          debug(`rude: rescheduling "${interruptedText}" after rude text`);
+          speechQueue.splice(1, 0, { text: interruptedText, resolve: () => {} });
+        }
         processQueue();
       });
     } else {
