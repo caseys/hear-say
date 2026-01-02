@@ -52,7 +52,7 @@ let pendingInterrupt: PendingInterrupt | undefined;
 // Speech rate configuration (words per minute) - configurable via env vars
 const MIN_RATE = Number(process.env.MIN_RATE) || 230;
 const MAX_RATE = Number(process.env.MAX_RATE) || 370;
-const WORD_THRESHOLD = Number(process.env.WORD_QUEUE_PLATEAU) || 15;
+const WORD_THRESHOLD = Number(process.env.WORD_QUEUE_PLATEAU) || 23;
 const VOICE = process.env.VOICE || '';
 
 function calculateRate(currentText: string): number {
