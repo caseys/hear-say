@@ -51,7 +51,7 @@ let pendingInterrupt: PendingInterrupt | undefined;
 
 // Speech rate configuration (words per minute) - configurable via env vars
 const MIN_RATE = Number(process.env.MIN_RATE) || 230;
-const MAX_RATE = Number(process.env.MAX_RATE) || 370;
+const MAX_RATE = Number(process.env.MAX_RATE) || 330;
 const WORD_THRESHOLD = Number(process.env.WORD_QUEUE_PLATEAU) || 23;
 const VOICE = process.env.VOICE || '';
 
@@ -123,26 +123,26 @@ function reduceRepetition(newText: string, lastText: string): string | null {
 
 function emitStart(): void {
   for (const listener of startListeners) {
-    listener();
+    try { listener(); } catch (error) { debug('emitStart error:', error); }
   }
 }
 
 function emitFinish(): void {
   for (const listener of finishListeners) {
-    listener();
+    try { listener(); } catch (error) { debug('emitFinish error:', error); }
   }
 }
 
 function emitGapStart(): void {
   for (const listener of gapStartListeners) {
-    listener();
+    try { listener(); } catch (error) { debug('emitGapStart error:', error); }
   }
 }
 
 function emitGapEnd(): void {
   gapCompletionResolver = undefined;
   for (const listener of gapEndListeners) {
-    listener();
+    try { listener(); } catch (error) { debug('emitGapEnd error:', error); }
   }
 }
 
@@ -240,10 +240,11 @@ async function processQueue(): Promise<void> {
   emitStart();
 
   while (speechQueue.length > 0 || pendingInterrupt) {
-    // Check cancellation flag (set by say(false))
+    // Check cancellation flag (set by say(false) or rude interrupt)
+    // Note: caller already resets processingQueue/speaking before setting this flag
     if (queueCancelled) {
       queueCancelled = false;
-      return;  // Exit without emitting finish (already done in say(false))
+      return;
     }
 
     // Check for pending interrupt BEFORE processing more queue items
