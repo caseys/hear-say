@@ -147,6 +147,7 @@ import {
   getLastSpoken,
   isSpeaking,
   setDebug,
+  setRepeatReduction,
   setHearMuted,
   isHearMuted,
   setGapDuration,
@@ -165,8 +166,17 @@ import {
 | `getLastSpoken()` | `string` | The last text that was spoken |
 | `isSpeaking()` | `boolean` | Whether TTS is currently active |
 | `setDebug(enabled)` | `void` | Enable/disable debug logging at runtime |
+| `setRepeatReduction(enabled)` | `void` | Enable/disable repeat reduction (default: on) |
 | `setHearMuted(enabled)` | `void` | Mute/unmute hear() callbacks |
 | `isHearMuted()` | `boolean` | Whether hear() is currently muted |
+
+**Repeat Reduction**: Automatically strips common prefix/suffix from consecutive `say()` calls, speaking only the changed portion. Exact duplicates are skipped entirely.
+
+```ts
+say("Processing file: 1 of 100")  // speaks full text
+say("Processing file: 2 of 100")  // speaks "2"
+say("Processing file: 2 of 100")  // skipped (duplicate)
+```
 
 ```ts
 import { setDebug } from 'hear-say';

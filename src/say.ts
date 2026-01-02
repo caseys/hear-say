@@ -11,6 +11,7 @@ function debug(...arguments_: unknown[]): void {
 let activeProcess: ChildProcess | undefined;
 let lastSpoken: string = '';
 let speaking: boolean = false;
+let repeatReductionEnabled: boolean = true;
 
 // Event listeners (supports multiple)
 const startListeners: Array<() => void> = [];
@@ -66,6 +67,60 @@ function calculateRate(currentText: string): number {
   return rate;
 }
 
+/**
+ * Reduce repetition by stripping common prefix and suffix from new text.
+ * Returns null if result is empty (exact duplicate - should be skipped).
+ */
+function reduceRepetition(newText: string, lastText: string): string | null {
+  // Find character-level common prefix
+  let prefixLen = 0;
+  while (prefixLen < newText.length &&
+         prefixLen < lastText.length &&
+         newText[prefixLen] === lastText[prefixLen]) {
+    prefixLen++;
+  }
+
+  // Snap prefix back to word boundary if mid-word
+  while (prefixLen > 0 && /\w/.test(newText[prefixLen - 1]) && /\w/.test(newText[prefixLen] || '')) {
+    prefixLen--;
+  }
+  // Extend prefix to include trailing punctuation/whitespace
+  while (prefixLen < newText.length && /[^\w]/.test(newText[prefixLen])) {
+    prefixLen++;
+  }
+
+  // Find character-level common suffix (don't overlap with prefix)
+  let suffixLen = 0;
+  const maxSuffix = Math.min(newText.length - prefixLen, lastText.length - prefixLen);
+  while (suffixLen < maxSuffix &&
+         newText[newText.length - 1 - suffixLen] === lastText[lastText.length - 1 - suffixLen]) {
+    suffixLen++;
+  }
+
+  // Snap suffix back to word boundary if mid-word
+  while (suffixLen > 0 && /\w/.test(newText[newText.length - suffixLen]) &&
+         /\w/.test(newText[newText.length - suffixLen - 1] || '')) {
+    suffixLen--;
+  }
+  // Extend suffix to include leading punctuation/whitespace
+  while (suffixLen < newText.length - prefixLen && /[^\w]/.test(newText[newText.length - 1 - suffixLen])) {
+    suffixLen++;
+  }
+
+  const result = newText.slice(prefixLen, newText.length - suffixLen).trim();
+
+  if (result === '') {
+    debug(`reduceRepetition: skipping duplicate "${newText}"`);
+    return null;
+  }
+
+  if (result !== newText) {
+    debug(`reduceRepetition: "${newText}" -> "${result}"`);
+  }
+
+  return result;
+}
+
 function emitStart(): void {
   for (const listener of startListeners) {
     listener();
@@ -96,14 +151,28 @@ function emitGapEnd(): void {
  */
 function speakOne(text: string): Promise<void> {
   return new Promise((resolve) => {
+    // Apply repeat reduction if enabled
+    let textToSpeak = text;
+    if (repeatReductionEnabled && lastSpoken) {
+      const reduced = reduceRepetition(text, lastSpoken);
+      if (reduced === null) {
+        // Exact duplicate - skip speaking
+        lastSpoken = text;  // Still update lastSpoken
+        resolve();
+        return;
+      }
+      textToSpeak = reduced;
+    }
+
+    // Store original text for future reduction comparisons
     lastSpoken = text;
-    const rate = calculateRate(text);
+    const rate = calculateRate(textToSpeak);
 
     const sayArguments = ['-r', String(rate)];
     if (VOICE) {
       sayArguments.push('-v', VOICE);
     }
-    sayArguments.push(text);
+    sayArguments.push(textToSpeak);
 
     debug(`exec: say ${sayArguments.join(' ')}`);
 
@@ -474,6 +543,15 @@ export function signalGapSpeechComplete(): void {
  */
 export function setGapDuration(ms: number): void {
   gapDuration = ms;
+}
+
+/**
+ * Enable or disable repeat reduction.
+ * When enabled (default), strips common prefix/suffix from consecutive texts.
+ * Exact duplicates are skipped entirely.
+ */
+export function setRepeatReduction(enabled: boolean): void {
+  repeatReductionEnabled = enabled;
 }
 
 // Cleanup on process exit
