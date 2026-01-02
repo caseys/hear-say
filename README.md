@@ -147,6 +147,8 @@ import {
   getLastSpoken,
   isSpeaking,
   setDebug,
+  setHearMuted,
+  isHearMuted,
   setGapDuration,
   onSayStarted,
   onSayFinished,
@@ -163,6 +165,8 @@ import {
 | `getLastSpoken()` | `string` | The last text that was spoken |
 | `isSpeaking()` | `boolean` | Whether TTS is currently active |
 | `setDebug(enabled)` | `void` | Enable/disable debug logging at runtime |
+| `setHearMuted(enabled)` | `void` | Mute/unmute hear() callbacks |
+| `isHearMuted()` | `boolean` | Whether hear() is currently muted |
 
 ```ts
 import { setDebug } from 'hear-say';

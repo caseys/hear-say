@@ -8,4 +8,4 @@ export { say, getLastSpoken, isSpeaking, onSayStarted, onSayFinished, onSayGapSt
 export type { SayOptions } from './say.js';
 export { hear } from './hear.js';
 export { loopback } from './loopback.js';
-export { setCapsLockMute, isCapsLockMuteEnabled, isHearMuted } from './capslock.js';
+export { setHearMuted, isHearMuted } from './mute.js';

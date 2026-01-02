@@ -1,7 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete } from './say.js';
 import { killProcess, debug as debugLog } from './utilities.js';
-import { isHearMuted } from './capslock.js';
+import { isHearMuted } from './mute.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[hear]', ...arguments_);
