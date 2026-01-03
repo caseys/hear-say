@@ -122,10 +122,21 @@ function isPhoneticallySimilar(wordCodes: [string, string], dictCodes: [string, 
     for (const c2 of dictCodes) {
       if (!c2) continue;
       if (c1 === c2) return true;
-      if (levenshtein(c1, c2) <= 2) return true;
+      if (levenshtein(c1, c2) <= 1) return true;
     }
   }
   return false;
+}
+
+/**
+ * Prefix bonus: reward matching first 2-3 characters.
+ */
+function prefixBonus(word: string, term: string): number {
+  const w = word.toLowerCase();
+  const t = term.toLowerCase();
+  if (w.slice(0, 3) === t.slice(0, 3)) return 0.15;
+  if (w.slice(0, 2) === t.slice(0, 2)) return 0.08;
+  return 0;
 }
 
 /**
@@ -138,8 +149,10 @@ function scoreMatch(word: string, wordCodes: [string, string], entry: InternalDi
   const maxLength = Math.max(wordLower.length, entry.termLower.length);
   const tScore = maxLength > 0 ? 1 - distribution / maxLength : 0;
 
-  // 50% phonetic + 30% text + 20% weight
-  return pScore * 0.5 + tScore * 0.3 + entry.weight * 0.2;
+  // 45% phonetic + 45% text + 10% weight + prefix bonus
+  let score = pScore * 0.45 + tScore * 0.45 + entry.weight * 0.1;
+  score += prefixBonus(word, entry.term);
+  return score;
 }
 
 /**
