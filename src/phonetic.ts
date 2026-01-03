@@ -29,8 +29,21 @@ interface InternalDictEntry {
   phonetic: [string, string];
 }
 
+interface InternalPhraseEntry {
+  term: string;           // Original term e.g., "match_planes"
+  words: string[];        // Split words e.g., ["match", "planes"]
+  wordsLower: string[];   // Lowercase words
+  weight: number;
+  phonetics: [string, string][];  // Phonetic codes for each word
+}
+
 // State
+let singleWordDict: InternalDictEntry[] = [];
+let phraseDict: InternalPhraseEntry[] = [];
+// Keep original dictionary reference for backward compat
 let dictionary: InternalDictEntry[] = [];
+// Known words from phrases (for exact-match only, not phonetic matching)
+let knownWordsFromPhrases: Set<string> = new Set();
 let options: PhoneticCorrectionOptions = {
   enabled: true,
   onFinal: true,
@@ -115,16 +128,35 @@ function phoneticScore(wordCodes: [string, string], dictCodes: [string, string])
 
 /**
  * Check if two words are phonetically similar (within threshold).
+ * Requires BOTH phonetic similarity AND prefix match for better accuracy.
  */
-function isPhoneticallySimilar(wordCodes: [string, string], dictCodes: [string, string]): boolean {
+function isPhoneticallySimilar(
+  wordCodes: [string, string],
+  dictCodes: [string, string],
+  word?: string,
+  dictTerm?: string
+): boolean {
+  // Check prefix match first (required)
+  if (!word || !dictTerm) {
+    return false;
+  }
+  const w = word.toLowerCase();
+  const t = dictTerm.toLowerCase();
+  const hasPrefix = w.length >= 2 && t.length >= 2 && w.slice(0, 2) === t.slice(0, 2);
+  if (!hasPrefix) {
+    return false;
+  }
+
+  // Check phonetic similarity (with relaxed threshold since prefix already matched)
   for (const c1 of wordCodes) {
     if (!c1) continue;
     for (const c2 of dictCodes) {
       if (!c2) continue;
       if (c1 === c2) return true;
-      if (levenshtein(c1, c2) <= 1) return true;
+      if (levenshtein(c1, c2) <= 2) return true;  // Relaxed from 1 to 2
     }
   }
+
   return false;
 }
 
@@ -176,6 +208,12 @@ function findBestMatch(word: string): string | undefined {
     }
   }
 
+  // Check if word is a known component from phrases (exact match only)
+  if (knownWordsFromPhrases.has(wordLower)) {
+    correctionCache.set(wordLower, ''); // No correction needed
+    return undefined;
+  }
+
   // Skip very short words
   if (word.length < 3) {
     correctionCache.set(wordLower, '');
@@ -187,8 +225,8 @@ function findBestMatch(word: string): string | undefined {
   let bestScore = 0;
 
   for (const entry of dictionary) {
-    // Filter: only consider phonetically similar words
-    if (!isPhoneticallySimilar(wordCodes, entry.phonetic)) {
+    // Filter: only consider phonetically similar words (or prefix matches)
+    if (!isPhoneticallySimilar(wordCodes, entry.phonetic, word, entry.term)) {
       continue;
     }
 
@@ -210,6 +248,93 @@ function findBestMatch(word: string): string | undefined {
   return undefined;
 }
 
+// Token type for phrase matching
+interface Token {
+  word: string;
+  isWord: boolean;
+  start: number;
+  end: number;
+  wordIndex?: number;  // Index among word tokens only
+}
+
+/**
+ * Check if consecutive words match a phrase entry.
+ */
+function matchesPhrase(wordTokens: Token[], startIdx: number, phrase: InternalPhraseEntry): boolean {
+  // Bounds check
+  if (startIdx + phrase.words.length > wordTokens.length) {
+    return false;
+  }
+
+  let totalScore = 0;
+
+  for (let j = 0; j < phrase.words.length; j++) {
+    const inputWord = wordTokens[startIdx + j].word;
+    const inputCodes = getPhonetic(inputWord);
+    const phraseCodes = phrase.phonetics[j];
+
+    // Must be phonetically similar (or prefix match)
+    if (!isPhoneticallySimilar(inputCodes, phraseCodes, inputWord, phrase.words[j])) {
+      return false;
+    }
+
+    totalScore += scoreMatch(inputWord, inputCodes, {
+      term: phrase.words[j],
+      termLower: phrase.wordsLower[j],
+      weight: phrase.weight,
+      phonetic: phraseCodes,
+    });
+  }
+
+  // Average score must meet threshold
+  const avgScore = totalScore / phrase.words.length;
+  return avgScore >= (options.minScore ?? 0.65);
+}
+
+/**
+ * Find phrase matches in word tokens.
+ * Returns map from word index to { term, wordCount }.
+ */
+function findPhraseMatches(
+  wordTokens: Token[]
+): Map<number, { term: string; wordCount: number }> {
+  const matches = new Map<number, { term: string; wordCount: number }>();
+  const matchedIndices = new Set<number>();
+
+  // phraseDict is already sorted by word count descending
+  for (let i = 0; i < wordTokens.length; i++) {
+    // Skip if already part of a longer match
+    if (matchedIndices.has(i)) continue;
+
+    for (const phrase of phraseDict) {
+      // Check if there are enough remaining words
+      if (i + phrase.words.length > wordTokens.length) continue;
+
+      // Check if any position would overlap with existing match
+      let hasOverlap = false;
+      for (let k = 0; k < phrase.words.length; k++) {
+        if (matchedIndices.has(i + k)) {
+          hasOverlap = true;
+          break;
+        }
+      }
+      if (hasOverlap) continue;
+
+      // Check if words match phrase
+      if (matchesPhrase(wordTokens, i, phrase)) {
+        matches.set(i, { term: phrase.term, wordCount: phrase.words.length });
+        // Mark all positions as matched
+        for (let k = 0; k < phrase.words.length; k++) {
+          matchedIndices.add(i + k);
+        }
+        break;  // Found match, move to next position
+      }
+    }
+  }
+
+  return matches;
+}
+
 /**
  * Set the dictionary for phonetic correction.
  */
@@ -218,21 +343,57 @@ export function setDictionary(terms: string[] | DictionaryEntry[]): void {
   phoneticCache.clear();
   correctionCache.clear();
 
-  dictionary = terms.map((item, index) => {
+  // Reset dictionaries
+  singleWordDict = [];
+  phraseDict = [];
+
+  for (let index = 0; index < terms.length; index++) {
+    const item = terms[index];
     const term = typeof item === 'string' ? item : item.term;
     const weight = typeof item === 'string'
       ? 1 - (index / (terms.length * 2))
       : (item.weight ?? 1 - (index / (terms.length * 2)));
+    const normalizedWeight = Math.max(0, Math.min(1, weight));
 
-    return {
-      term,
-      termLower: term.toLowerCase(),
-      weight: Math.max(0, Math.min(1, weight)),
-      phonetic: doubleMetaphone(term.toLowerCase()) as [string, string],
-    };
-  });
+    // Split on underscore or space to detect phrases
+    const words = term.split(/[_\s]+/).filter(w => w.length > 0);
 
-  debug(`dictionary set with ${dictionary.length} terms`);
+    if (words.length >= 2) {
+      // Multi-word phrase entry
+      phraseDict.push({
+        term,
+        words,
+        wordsLower: words.map(w => w.toLowerCase()),
+        weight: normalizedWeight,
+        phonetics: words.map(w => doubleMetaphone(w.toLowerCase()) as [string, string]),
+      });
+    } else {
+      // Single word entry
+      singleWordDict.push({
+        term,
+        termLower: term.toLowerCase(),
+        weight: normalizedWeight,
+        phonetic: doubleMetaphone(term.toLowerCase()) as [string, string],
+      });
+    }
+  }
+
+  // Build set of known words from phrases (for exact-match only)
+  // This prevents "planes" from being corrected when "match_planes" is in dictionary
+  knownWordsFromPhrases = new Set();
+  for (const phrase of phraseDict) {
+    for (const wordLower of phrase.wordsLower) {
+      knownWordsFromPhrases.add(wordLower);
+    }
+  }
+
+  // Keep dictionary pointing to singleWordDict for backward compat
+  dictionary = singleWordDict;
+
+  // Sort phrases by word count descending (longest first for matching)
+  phraseDict.sort((a, b) => b.words.length - a.words.length);
+
+  debug(`dictionary set: ${singleWordDict.length} single words, ${phraseDict.length} phrases`);
 }
 
 /**
@@ -256,7 +417,7 @@ export function clearCaches(): void {
  */
 export function correctText(text: string, isFinal: boolean): string {
   // Check if enabled
-  if (!options.enabled || dictionary.length === 0) {
+  if (!options.enabled || (singleWordDict.length === 0 && phraseDict.length === 0)) {
     return text;
   }
 
@@ -269,10 +430,11 @@ export function correctText(text: string, isFinal: boolean): string {
   }
 
   // Tokenize preserving structure
-  const tokens: Array<{ word: string; isWord: boolean; start: number; end: number }> = [];
+  const tokens: Token[] = [];
   const wordRegex = /\b\w+\b/g;
   let match: RegExpExecArray | null;
   let lastEnd = 0;
+  let wordIndex = 0;
 
   while ((match = wordRegex.exec(text)) !== null) {
     // Add any non-word content before this word
@@ -289,6 +451,7 @@ export function correctText(text: string, isFinal: boolean): string {
       isWord: true,
       start: match.index,
       end: match.index + match[0].length,
+      wordIndex: wordIndex++,
     });
     lastEnd = match.index + match[0].length;
   }
@@ -315,15 +478,33 @@ export function correctText(text: string, isFinal: boolean): string {
     ? wordTokens.slice(0, -1)
     : wordTokens;
 
-  // Identify stopwords
+  // Try phrase matches first (uses wordsToProcess indices)
+  const phraseMatches = phraseDict.length > 0 ? findPhraseMatches(wordsToProcess) : new Map();
+
+  // Build set of word indices that are part of phrase matches
+  const phraseMatchedIndices = new Set<number>();
+  for (const [startIdx, match] of phraseMatches) {
+    for (let k = 0; k < match.wordCount; k++) {
+      phraseMatchedIndices.add(startIdx + k);
+    }
+  }
+
+  // Identify stopwords for single-word matching
   const words = wordsToProcess.map(t => t.word);
   const filtered = removeStopwords(words) as string[];
   const filteredSet = new Set(filtered.map(w => w.toLowerCase()));
 
-  // Process each word
-  const corrections = new Map<number, string>();
+  // Process single words (skip those in phrase matches)
+  const singleCorrections = new Map<number, string>();
 
-  for (const token of wordsToProcess) {
+  for (let i = 0; i < wordsToProcess.length; i++) {
+    const token = wordsToProcess[i];
+
+    // Skip if part of phrase match
+    if (phraseMatchedIndices.has(i)) {
+      continue;
+    }
+
     // Skip if it's a stopword
     if (!filteredSet.has(token.word.toLowerCase())) {
       continue;
@@ -331,18 +512,63 @@ export function correctText(text: string, isFinal: boolean): string {
 
     const correction = findBestMatch(token.word);
     if (correction) {
-      corrections.set(token.start, correction);
+      singleCorrections.set(token.start, correction);
     }
   }
 
   // Reconstruct with corrections
-  if (corrections.size === 0) {
+  if (phraseMatches.size === 0 && singleCorrections.size === 0) {
     return text;
   }
 
   let result = '';
+  // Track which wordIndex range we're skipping (for phrase matches)
+  let skipFromWordIndex = -1;
+  let skipToWordIndex = -1;  // exclusive
+
   for (const token of tokens) {
-    const correction = corrections.get(token.start);
+    if (!token.isWord) {
+      // Non-word content: skip only if between phrase words
+      // Need to check if we're between skipFromWordIndex and skipToWordIndex
+      // Look at surrounding word tokens to determine position
+      const prevWordToken = tokens.slice(0, tokens.indexOf(token)).reverse().find(t => t.isWord);
+      const nextWordToken = tokens.slice(tokens.indexOf(token) + 1).find(t => t.isWord);
+
+      const prevIdx = prevWordToken?.wordIndex ?? -1;
+      const nextIdx = nextWordToken?.wordIndex ?? Infinity;
+
+      // Skip if this separator is between words that are both part of the same phrase
+      // Both prev and next must be IN the phrase (skipToWordIndex is exclusive)
+      if (prevIdx >= skipFromWordIndex && prevIdx < skipToWordIndex &&
+          nextIdx >= skipFromWordIndex && nextIdx < skipToWordIndex) {
+        continue;
+      }
+
+      result += token.word;
+      continue;
+    }
+
+    const wIdx = token.wordIndex!;
+
+    // Check if we're skipping this word (part of phrase, not the first word)
+    if (wIdx > skipFromWordIndex && wIdx < skipToWordIndex) {
+      continue;
+    }
+
+    // Check if this starts a phrase match
+    const processIdx = wordsToProcess.findIndex(t => t.wordIndex === wIdx);
+    if (processIdx >= 0 && phraseMatches.has(processIdx)) {
+      const match = phraseMatches.get(processIdx)!;
+      result += match.term;
+      // Set skip range for subsequent words in phrase
+      skipFromWordIndex = wIdx;
+      const lastPhraseWordIdx = wordsToProcess[processIdx + match.wordCount - 1]?.wordIndex ?? wIdx;
+      skipToWordIndex = lastPhraseWordIdx + 1;
+      continue;
+    }
+
+    // Single word: apply correction or keep original
+    const correction = singleCorrections.get(token.start);
     result += correction ?? token.word;
   }
 

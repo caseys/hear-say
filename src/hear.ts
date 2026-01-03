@@ -10,6 +10,7 @@ function debug(...arguments_: unknown[]): void {
 
 type Callback = (text: string, stop: () => void, final: boolean) => void;
 
+// Core state
 let activeProcess: ChildProcess | undefined;
 let currentCallback: Callback | undefined;
 let silenceTimer: NodeJS.Timeout | undefined;
@@ -17,7 +18,10 @@ let lastTranscribedText: string = '';
 let timeoutDuration: number = 2500;
 let shouldContinueListening: boolean = false;
 let inGap: boolean = false;
-let suppressCallbacks: boolean = false;  // Prevent callbacks during TTS (handles buffered data race)
+let suppressCallbacks: boolean = false;
+
+// Generation token - incremented on every intentional stop to invalidate stale exit handlers
+let hearGeneration: number = 0;
 
 // Gap listener unregister functions (only registered when hear() is active)
 let unregisterGapStart: (() => void) | undefined;
@@ -30,18 +34,56 @@ function clearSilenceTimer(): void {
   }
 }
 
-function cleanup(): void {
+/**
+ * Centralized helper to stop the active hear process.
+ * Bumps the generation token to invalidate any pending exit handlers.
+ */
+function stopActiveProcess(): void {
+  debug('[hear] stopActiveProcess: gen', hearGeneration, '->', hearGeneration + 1);
   shouldContinueListening = false;
-  suppressCallbacks = false;
-  currentCallback = undefined;
-  clearSilenceTimer();
+  suppressCallbacks = true;
+  hearGeneration++;  // Invalidate any pending exit handlers
 
   if (activeProcess) {
     killProcess(activeProcess);
-    activeProcess = undefined;
+    activeProcess = undefined;  // Clear immediately so scheduleRestart() can work
+  }
+  clearSilenceTimer();
+  lastTranscribedText = '';
+}
+
+/**
+ * Centralized helper to restart hearing if conditions allow.
+ * Checks generation token to avoid races with stopActiveProcess().
+ */
+function scheduleRestart(): void {
+  const myGeneration = hearGeneration;
+  debug('[hear] scheduleRestart: gen', myGeneration, 'activeProcess?', !!activeProcess, 'speaking?', isSpeaking(), 'muted?', isHearMuted(), 'callback?', !!currentCallback);
+
+  // Don't restart if already listening, speaking, or muted
+  if (activeProcess || isSpeaking() || isHearMuted()) {
+    return;
   }
 
-  lastTranscribedText = '';
+  // Don't restart if no callback registered
+  if (!currentCallback) {
+    return;
+  }
+
+  // Verify generation hasn't changed (something else stopped us)
+  if (myGeneration !== hearGeneration) {
+    debug('[hear] scheduleRestart: generation changed, aborting');
+    return;
+  }
+
+  debug('[hear] scheduleRestart: starting');
+  startListening();
+}
+
+function cleanup(): void {
+  stopActiveProcess();
+  suppressCallbacks = false;  // Reset after stop
+  currentCallback = undefined;
 
   // Unregister gap listeners
   if (unregisterGapStart) {
@@ -56,7 +98,6 @@ function cleanup(): void {
 
 /** Shared stop function passed to callbacks */
 function stopListening(): void {
-  shouldContinueListening = false;
   cleanup();
 }
 
@@ -108,7 +149,9 @@ function onSilence(): void {
 }
 
 function startListening(): void {
-  debug('[hear] startListening called');
+  const myGeneration = hearGeneration;  // Capture current generation
+  debug('[hear] startListening: gen', myGeneration);
+
   lastTranscribedText = '';
   shouldContinueListening = true;
   suppressCallbacks = false;  // Re-enable callbacks when intentionally starting
@@ -118,18 +161,27 @@ function startListening(): void {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  const proc = activeProcess;  // Capture reference for closures
+
   // Drain stderr to prevent blocking
-  activeProcess.stderr?.resume();
+  proc.stderr?.resume();
 
   // Handle errors (e.g., missing binary)
-  activeProcess.on('error', () => {
-    activeProcess = undefined;
+  proc.on('error', () => {
+    if (proc === activeProcess) {
+      activeProcess = undefined;
+    }
     clearSilenceTimer();
   });
 
   let lineBuffer = '';
 
-  activeProcess.stdout!.on('data', (chunk: Buffer) => {
+  proc.stdout!.on('data', (chunk: Buffer) => {
+    // Ignore data from stale processes
+    if (myGeneration !== hearGeneration) {
+      return;
+    }
+
     // Handle partial chunks
     lineBuffer += chunk.toString();
 
@@ -149,11 +201,20 @@ function startListening(): void {
     }
   });
 
-  activeProcess.on('exit', () => {
-    activeProcess = undefined;
-    clearSilenceTimer();
+  proc.on('exit', () => {
+    // Only do cleanup if this is still our process (not superseded)
+    if (proc === activeProcess) {
+      activeProcess = undefined;
+      clearSilenceTimer();  // Only clear OUR timer, not a new process's timer
+    }
 
-    // Restart if we should and have a callback (but not if muted)
+    // Don't auto-restart if generation changed (intentional stop)
+    if (myGeneration !== hearGeneration) {
+      debug('[hear] skipping restart (gen mismatch:', myGeneration, '!==', hearGeneration, ')');
+      return;
+    }
+
+    // Auto-restart only if explicitly requested (shouldContinueListening)
     if (shouldContinueListening && currentCallback && !isHearMuted()) {
       startListening();
     }
@@ -183,25 +244,15 @@ export function hear(
   // Register gap listeners if not already registered
   if (!unregisterGapStart) {
     unregisterGapStart = onSayGapStart(() => {
-      debug('[hear] onSayGapStart: currentCallback?', !!currentCallback, 'activeProcess?', !!activeProcess);
+      debug('[hear] onSayGapStart');
       inGap = true;
       lastTranscribedText = '';
-      if (currentCallback && !activeProcess) {
-        debug('[hear] starting hear during gap');
-        startListening();
-      }
+      scheduleRestart();
     });
     unregisterGapEnd = onSayGapEnd(() => {
-      debug('[hear] onSayGapEnd: activeProcess?', !!activeProcess);
+      debug('[hear] onSayGapEnd');
       inGap = false;
-      if (activeProcess) {
-        shouldContinueListening = false;  // Don't auto-restart
-        killProcess(activeProcess);
-        activeProcess = undefined;
-        clearSilenceTimer();
-        lastTranscribedText = '';
-        debug('[hear] killed hear process at gap end');
-      }
+      stopActiveProcess();
     });
   }
 
@@ -235,49 +286,25 @@ process.on('SIGTERM', () => {
   process.exit(143);
 });
 
-// When TTS starts, stop hearing (caller will start hear() again when ready)
+// When TTS starts, stop hearing
 onSayStarted(() => {
-  debug('[hear] onSayStarted: activeProcess?', !!activeProcess);
-  // Suppress callbacks immediately to prevent buffered data from triggering loopback
-  suppressCallbacks = true;
-  if (activeProcess) {
-    shouldContinueListening = false;  // Don't auto-restart
-    killProcess(activeProcess);
-    activeProcess = undefined;
-    clearSilenceTimer();
-    lastTranscribedText = '';
-    debug('[hear] killed hear process');
-  }
+  debug('[hear] onSayStarted');
+  stopActiveProcess();
 });
 
-// When TTS finishes (say process exits), start hear if callback is waiting
+// When TTS finishes, restart hearing if callback is waiting
 onSayFinished(() => {
-  debug('[hear] onSayFinished: currentCallback?', !!currentCallback, 'activeProcess?', !!activeProcess);
-  lastTranscribedText = '';
+  debug('[hear] onSayFinished');
   inGap = false;
-  if (currentCallback && !activeProcess) {
-    debug('[hear] starting hear after TTS finished');
-    startListening();
-  }
+  scheduleRestart();
 });
 
 // Stop/start hear process based on mute state
 onMuteChange((muted) => {
   debug('[hear] onMuteChange:', muted);
   if (muted) {
-    // Kill hear process while muted - keep callback for restart on unmute
-    if (activeProcess) {
-      killProcess(activeProcess);
-      activeProcess = undefined;
-      clearSilenceTimer();
-      lastTranscribedText = '';
-      debug('[hear] killed hear process for mute');
-    }
+    stopActiveProcess();
   } else {
-    // Restart hear when unmuted (if we have callback and not speaking)
-    if (currentCallback && !activeProcess && !isSpeaking()) {
-      debug('[hear] restarting hear after unmute');
-      startListening();
-    }
+    scheduleRestart();
   }
 });
