@@ -1,7 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete } from './say.js';
 import { killProcess, debug as debugLog } from './utilities.js';
-import { isHearMuted } from './mute.js';
+import { isHearMuted, onMuteChange } from './mute.js';
 import { correctText, clearCaches } from './phonetic.js';
 
 function debug(...arguments_: unknown[]): void {
@@ -153,8 +153,8 @@ function startListening(): void {
     activeProcess = undefined;
     clearSilenceTimer();
 
-    // Restart if we should and have a callback
-    if (shouldContinueListening && currentCallback) {
+    // Restart if we should and have a callback (but not if muted)
+    if (shouldContinueListening && currentCallback && !isHearMuted()) {
       startListening();
     }
   });
@@ -258,5 +258,26 @@ onSayFinished(() => {
   if (currentCallback && !activeProcess) {
     debug('[hear] starting hear after TTS finished');
     startListening();
+  }
+});
+
+// Stop/start hear process based on mute state
+onMuteChange((muted) => {
+  debug('[hear] onMuteChange:', muted);
+  if (muted) {
+    // Kill hear process while muted - keep callback for restart on unmute
+    if (activeProcess) {
+      killProcess(activeProcess);
+      activeProcess = undefined;
+      clearSilenceTimer();
+      lastTranscribedText = '';
+      debug('[hear] killed hear process for mute');
+    }
+  } else {
+    // Restart hear when unmuted (if we have callback and not speaking)
+    if (currentCallback && !activeProcess && !isSpeaking()) {
+      debug('[hear] restarting hear after unmute');
+      startListening();
+    }
   }
 });
