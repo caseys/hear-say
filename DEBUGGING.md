@@ -10,24 +10,23 @@
 
 ## Debug Log File
 
-All debug output writes to:
-```
-/Users/casey/src/hear-say/debug.log
-```
+Debug output writes to a configurable location:
+- Set `HEAR_SAY_DEBUG_LOG` env var for custom path
+- Default: `$TMPDIR/hear-say-debug.log` (e.g., `/tmp/hear-say-debug.log` on macOS/Linux)
 
 To read recent logs:
 ```bash
-tail -100 /Users/casey/src/hear-say/debug.log
+tail -100 ${HEAR_SAY_DEBUG_LOG:-$TMPDIR/hear-say-debug.log}
 ```
 
 To watch live:
 ```bash
-tail -f /Users/casey/src/hear-say/debug.log
+tail -f ${HEAR_SAY_DEBUG_LOG:-$TMPDIR/hear-say-debug.log}
 ```
 
 To clear:
 ```bash
-echo "" > /Users/casey/src/hear-say/debug.log
+echo "" > ${HEAR_SAY_DEBUG_LOG:-$TMPDIR/hear-say-debug.log}
 ```
 
 ## What to Look For

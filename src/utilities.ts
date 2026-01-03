@@ -1,8 +1,11 @@
 import { ChildProcess } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-// Debug log file path
-const DEBUG_LOG_FILE = '/Users/casey/src/hear-say/debug.log';
+// Debug log file path - configurable via env, defaults to temp dir
+const DEBUG_LOG_FILE = process.env.HEAR_SAY_DEBUG_LOG
+  || join(tmpdir(), 'hear-say-debug.log');
 
 // Shared debug state - reads env var at module load, can be overridden at runtime
 let debugEnabled = process.env.HEAR_SAY_DEBUG === '1' || process.env.HEAR_SAY_DEBUG === 'true';

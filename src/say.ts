@@ -22,7 +22,10 @@ const gapEndListeners: Array<() => void> = [];
 // Gap configuration (pause between queue items to allow hearing) - SAY_QUEUE_BREAK in seconds
 let gapDuration = (Number(process.env.SAY_QUEUE_BREAK) || 2) * 1000;
 let gapCompletionResolver: (() => void) | undefined;
-let queueCancelled = false;
+
+// Queue generation counter - each processQueue instance has its own generation
+// Incrementing this signals any running queue to exit on next check
+let queueGeneration = 0;
 
 // Queue entries with their resolvers
 interface QueueEntry {
@@ -237,74 +240,79 @@ async function processQueue(): Promise<void> {
   if (processingQueue) return;
   processingQueue = true;
   speaking = true;
+  const myGeneration = ++queueGeneration;
   emitStart();
 
-  while (speechQueue.length > 0 || pendingInterrupt) {
-    // Check cancellation flag (set by say(false) or rude interrupt)
-    // Note: caller already resets processingQueue/speaking before setting this flag
-    if (queueCancelled) {
-      queueCancelled = false;
-      return;
-    }
-
-    // Check for pending interrupt BEFORE processing more queue items
-    if (pendingInterrupt) {
-      const entry = pendingInterrupt;
-      pendingInterrupt = undefined;
-      if (entry.clear) {
-        // Clear remaining queue (including latest entry)
-        for (const queueEntry of speechQueue) {
-          queueEntry.resolve();
-        }
-        speechQueue.length = 0;
-        latestEntry = undefined;
-      }
-      await speakOne(entry.text);
-      if (queueCancelled) {
-        queueCancelled = false;
+  try {
+    while (speechQueue.length > 0 || pendingInterrupt) {
+      // Check if superseded by newer queue or cancelled via say(false)
+      if (queueGeneration !== myGeneration) {
         return;
       }
-      entry.resolve();
 
-      // Gap after interrupt if more to say
-      if (speechQueue.length > 0 || pendingInterrupt) {
-        await waitForGap();
-        if (queueCancelled) {
-          queueCancelled = false;
+      // Check for pending interrupt BEFORE processing more queue items
+      if (pendingInterrupt) {
+        const entry = pendingInterrupt;
+        pendingInterrupt = undefined;
+        if (entry.clear) {
+          // Clear remaining queue (including latest entry)
+          for (const queueEntry of speechQueue) {
+            queueEntry.resolve();
+          }
+          speechQueue.length = 0;
+          latestEntry = undefined;
+        }
+        await speakOne(entry.text);
+        // Always resolve after speaking completes (even if cancelled)
+        // so caller's await doesn't hang
+        entry.resolve();
+        if (queueGeneration !== myGeneration) {
           return;
         }
+
+        // Gap after interrupt if more to say
+        if (speechQueue.length > 0 || pendingInterrupt) {
+          await waitForGap();
+          if (queueGeneration !== myGeneration) {
+            return;
+          }
+        }
+        continue;  // Re-check for another interrupt
       }
-      continue;  // Re-check for another interrupt
+
+      // Process one queue item
+      if (speechQueue.length > 0) {
+        const entry = speechQueue.shift()!;
+        // Clear latest tracking if this was the latest entry
+        if (entry === latestEntry) {
+          latestEntry = undefined;
+        }
+        await speakOne(entry.text);
+        // Always resolve after speaking completes (even if cancelled)
+        // so caller's await doesn't hang
+        entry.resolve();
+        if (queueGeneration !== myGeneration) {
+          return;
+        }
+
+        // Gap after item if more to say
+        if (speechQueue.length > 0 || pendingInterrupt) {
+          await waitForGap();
+          if (queueGeneration !== myGeneration) {
+            return;
+          }
+        }
+      }
     }
-
-    // Process one queue item
-    if (speechQueue.length > 0) {
-      const entry = speechQueue.shift()!;
-      // Clear latest tracking if this was the latest entry
-      if (entry === latestEntry) {
-        latestEntry = undefined;
-      }
-      await speakOne(entry.text);
-      if (queueCancelled) {
-        queueCancelled = false;
-        return;
-      }
-      entry.resolve();
-
-      // Gap after item if more to say
-      if (speechQueue.length > 0 || pendingInterrupt) {
-        await waitForGap();
-        if (queueCancelled) {
-          queueCancelled = false;
-          return;
-        }
-      }
+  } finally {
+    // Only cleanup if we're still the current generation
+    // (if superseded, the new queue or say(false) handles cleanup)
+    if (queueGeneration === myGeneration) {
+      speaking = false;
+      processingQueue = false;
+      emitFinish();
     }
   }
-
-  speaking = false;
-  processingQueue = false;
-  emitFinish();
 }
 
 /**
@@ -334,8 +342,8 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
 
   // If false, stop everything and clear queue
   if (text === false) {
-    // Set cancellation flag first so processQueue() exits cleanly
-    queueCancelled = true;
+    // Increment generation to signal any running queue to exit
+    queueGeneration++;
 
     // Abort any pending gap
     if (gapCompletionResolver) {
@@ -370,9 +378,6 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
 
   if (isInterrupt) {
     if (sayOptions.rude) {
-      // Set cancellation flag so old processQueue() exits cleanly
-      queueCancelled = true;
-
       // Capture interrupted text before killing (to reschedule after rude text)
       let interruptedText: string | undefined;
       if (activeProcess && lastSpoken) {
@@ -422,9 +427,7 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
           debug(`rude: rescheduling "${interruptedText}" after rude text`);
           speechQueue.splice(1, 0, { text: interruptedText, resolve: () => {} });
         }
-        // Clear cancellation flag before starting new queue processing
-        // (it was set to cancel the OLD processQueue, not the new one)
-        queueCancelled = false;
+        // New processQueue() will increment generation, causing old queue to exit
         processQueue();
       });
     } else {
