@@ -4,7 +4,7 @@ import { checkPlatform, checkHearBinary } from './platform.js';
 checkPlatform();
 checkHearBinary();
 
-export { say, getLastSpoken, isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete, setGapDuration, setRepeatReduction, setDebug } from './say.js';
+export { say, getLastSpoken, isSpeaking, getSayStatus, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete, setGapDuration, setRepeatReduction, setDebug } from './say.js';
 export type { SayOptions } from './say.js';
 export { hear } from './hear.js';
 export { loopback } from './loopback.js';

@@ -324,6 +324,14 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
     return Promise.resolve();
   }
 
+  // Self-healing: detect and recover from stuck processingQueue state
+  // This is an impossible state - processingQueue true but nothing to process and no active process
+  if (processingQueue && speechQueue.length === 0 && !pendingInterrupt && !activeProcess) {
+    debug('self-healing: resetting stuck processingQueue');
+    processingQueue = false;
+    speaking = false;
+  }
+
   // If false, stop everything and clear queue
   if (text === false) {
     // Set cancellation flag first so processQueue() exits cleanly
@@ -468,6 +476,27 @@ export function getLastSpoken(): string {
 
 export function isSpeaking(): boolean {
   return speaking;
+}
+
+/**
+ * Get internal state for debugging.
+ */
+export function getSayStatus(): {
+  processingQueue: boolean;
+  speaking: boolean;
+  queueLength: number;
+  hasPendingInterrupt: boolean;
+  hasActiveProcess: boolean;
+  lastSpoken: string;
+} {
+  return {
+    processingQueue,
+    speaking,
+    queueLength: speechQueue.length,
+    hasPendingInterrupt: !!pendingInterrupt,
+    hasActiveProcess: !!activeProcess,
+    lastSpoken,
+  };
 }
 
 /**
