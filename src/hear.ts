@@ -17,6 +17,7 @@ let lastTranscribedText: string = '';
 let timeoutDuration: number = 2500;
 let shouldContinueListening: boolean = false;
 let inGap: boolean = false;
+let suppressCallbacks: boolean = false;  // Prevent callbacks during TTS (handles buffered data race)
 
 // Gap listener unregister functions (only registered when hear() is active)
 let unregisterGapStart: (() => void) | undefined;
@@ -31,6 +32,7 @@ function clearSilenceTimer(): void {
 
 function cleanup(): void {
   shouldContinueListening = false;
+  suppressCallbacks = false;
   currentCallback = undefined;
   clearSilenceTimer();
 
@@ -67,9 +69,9 @@ function resetSilenceTimer(): void {
 }
 
 function onSilence(): void {
-  debug('[hear] onSilence: lastTranscribedText?', !!lastTranscribedText, 'currentCallback?', !!currentCallback, 'muted?', isHearMuted());
-  // Only fire if we have accumulated text and a callback
-  if (!lastTranscribedText || !currentCallback) {
+  debug('[hear] onSilence: lastTranscribedText?', !!lastTranscribedText, 'currentCallback?', !!currentCallback, 'muted?', isHearMuted(), 'suppressed?', suppressCallbacks);
+  // Only fire if we have accumulated text and a callback, and not suppressed
+  if (!lastTranscribedText || !currentCallback || suppressCallbacks) {
     // Keep timer running if we're still listening
     if (currentCallback && activeProcess) {
       resetSilenceTimer();
@@ -109,6 +111,7 @@ function startListening(): void {
   debug('[hear] startListening called');
   lastTranscribedText = '';
   shouldContinueListening = true;
+  suppressCallbacks = false;  // Re-enable callbacks when intentionally starting
   clearCaches(); // Fresh phonetic caches for new utterance
 
   activeProcess = spawn('hear', [], {
@@ -138,8 +141,8 @@ function startListening(): void {
       if (line.trim()) {
         lastTranscribedText = line;
         resetSilenceTimer();
-        // Call callback for each line with final=false (skip if muted)
-        if (currentCallback && !isHearMuted()) {
+        // Call callback for each line with final=false (skip if muted or suppressed)
+        if (currentCallback && !isHearMuted() && !suppressCallbacks) {
           currentCallback(correctText(line, false), stopListening, false);
         }
       }
@@ -235,6 +238,8 @@ process.on('SIGTERM', () => {
 // When TTS starts, stop hearing (caller will start hear() again when ready)
 onSayStarted(() => {
   debug('[hear] onSayStarted: activeProcess?', !!activeProcess);
+  // Suppress callbacks immediately to prevent buffered data from triggering loopback
+  suppressCallbacks = true;
   if (activeProcess) {
     shouldContinueListening = false;  // Don't auto-restart
     killProcess(activeProcess);

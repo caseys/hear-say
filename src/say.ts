@@ -422,6 +422,9 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
           debug(`rude: rescheduling "${interruptedText}" after rude text`);
           speechQueue.splice(1, 0, { text: interruptedText, resolve: () => {} });
         }
+        // Clear cancellation flag before starting new queue processing
+        // (it was set to cancel the OLD processQueue, not the new one)
+        queueCancelled = false;
         processQueue();
       });
     } else {
