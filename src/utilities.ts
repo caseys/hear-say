@@ -1,4 +1,8 @@
 import { ChildProcess } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+
+// Debug log file path
+const DEBUG_LOG_FILE = '/Users/casey/src/hear-say/debug.log';
 
 // Shared debug state - reads env var at module load, can be overridden at runtime
 let debugEnabled = process.env.HEAR_SAY_DEBUG === '1' || process.env.HEAR_SAY_DEBUG === 'true';
@@ -19,8 +23,19 @@ export function isDebugEnabled(): boolean {
 
 /**
  * Log a debug message with a prefix.
+ * Always writes to debug.log file for diagnostics.
  */
 export function debug(prefix: string, ...arguments_: unknown[]): void {
+  const timestamp = new Date().toISOString();
+  const message = `${timestamp} ${prefix} ${arguments_.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`;
+
+  // Always write to file for diagnostics
+  try {
+    appendFileSync(DEBUG_LOG_FILE, message);
+  } catch {
+    // Ignore file write errors
+  }
+
   if (debugEnabled) {
     console.log(prefix, ...arguments_);
   }
