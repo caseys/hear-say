@@ -69,49 +69,49 @@ function calculateRate(currentText: string): number {
 
 /**
  * Reduce repetition by stripping common prefix and suffix from new text.
- * Returns null if result is empty (exact duplicate - should be skipped).
+ * Returns undefined if result is empty (exact duplicate - should be skipped).
  */
-function reduceRepetition(newText: string, lastText: string): string | null {
+function reduceRepetition(newText: string, lastText: string): string | undefined {
   // Find character-level common prefix
-  let prefixLen = 0;
-  while (prefixLen < newText.length &&
-         prefixLen < lastText.length &&
-         newText[prefixLen] === lastText[prefixLen]) {
-    prefixLen++;
+  let prefixLength = 0;
+  while (prefixLength < newText.length &&
+         prefixLength < lastText.length &&
+         newText[prefixLength] === lastText[prefixLength]) {
+    prefixLength++;
   }
 
   // Snap prefix back to word boundary if mid-word
-  while (prefixLen > 0 && /\w/.test(newText[prefixLen - 1]) && /\w/.test(newText[prefixLen] || '')) {
-    prefixLen--;
+  while (prefixLength > 0 && /\w/.test(newText[prefixLength - 1]) && /\w/.test(newText[prefixLength] || '')) {
+    prefixLength--;
   }
   // Extend prefix to include trailing punctuation/whitespace
-  while (prefixLen < newText.length && /[^\w]/.test(newText[prefixLen])) {
-    prefixLen++;
+  while (prefixLength < newText.length && /[^\w]/.test(newText[prefixLength])) {
+    prefixLength++;
   }
 
   // Find character-level common suffix (don't overlap with prefix)
-  let suffixLen = 0;
-  const maxSuffix = Math.min(newText.length - prefixLen, lastText.length - prefixLen);
-  while (suffixLen < maxSuffix &&
-         newText[newText.length - 1 - suffixLen] === lastText[lastText.length - 1 - suffixLen]) {
-    suffixLen++;
+  let suffixLength = 0;
+  const maxSuffix = Math.min(newText.length - prefixLength, lastText.length - prefixLength);
+  while (suffixLength < maxSuffix &&
+         newText[newText.length - 1 - suffixLength] === lastText[lastText.length - 1 - suffixLength]) {
+    suffixLength++;
   }
 
   // Snap suffix back to word boundary if mid-word
-  while (suffixLen > 0 && /\w/.test(newText[newText.length - suffixLen]) &&
-         /\w/.test(newText[newText.length - suffixLen - 1] || '')) {
-    suffixLen--;
+  while (suffixLength > 0 && /\w/.test(newText[newText.length - suffixLength]) &&
+         /\w/.test(newText[newText.length - suffixLength - 1] || '')) {
+    suffixLength--;
   }
   // Extend suffix to include leading punctuation/whitespace
-  while (suffixLen < newText.length - prefixLen && /[^\w]/.test(newText[newText.length - 1 - suffixLen])) {
-    suffixLen++;
+  while (suffixLength < newText.length - prefixLength && /[^\w]/.test(newText[newText.length - 1 - suffixLength])) {
+    suffixLength++;
   }
 
-  const result = newText.slice(prefixLen, newText.length - suffixLen).trim();
+  const result = newText.slice(prefixLength, newText.length - suffixLength).trim();
 
   if (result === '') {
     debug(`reduceRepetition: skipping duplicate "${newText}"`);
-    return null;
+    return undefined;
   }
 
   if (result !== newText) {
@@ -155,7 +155,7 @@ function speakOne(text: string): Promise<void> {
     let textToSpeak = text;
     if (repeatReductionEnabled && lastSpoken) {
       const reduced = reduceRepetition(text, lastSpoken);
-      if (reduced === null) {
+      if (reduced === undefined) {
         // Exact duplicate - skip speaking
         lastSpoken = text;  // Still update lastSpoken
         resolve();

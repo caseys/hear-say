@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete } from './say.js';
 import { killProcess, debug as debugLog } from './utilities.js';
 import { isHearMuted } from './mute.js';
+import { correctText, clearCaches } from './phonetic.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[hear]', ...arguments_);
@@ -95,7 +96,7 @@ function onSilence(): void {
   }
 
   // Invoke callback with final=true - new process is already spawning
-  callback(text, stopListening, true);
+  callback(correctText(text, true), stopListening, true);
 
   // If we're in a gap and speech was captured, signal completion
   if (inGap) {
@@ -108,6 +109,7 @@ function startListening(): void {
   debug('[hear] startListening called');
   lastTranscribedText = '';
   shouldContinueListening = true;
+  clearCaches(); // Fresh phonetic caches for new utterance
 
   activeProcess = spawn('hear', [], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -138,7 +140,7 @@ function startListening(): void {
         resetSilenceTimer();
         // Call callback for each line with final=false (skip if muted)
         if (currentCallback && !isHearMuted()) {
-          currentCallback(line, stopListening, false);
+          currentCallback(correctText(line, false), stopListening, false);
         }
       }
     }

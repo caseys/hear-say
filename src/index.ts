@@ -9,3 +9,5 @@ export type { SayOptions } from './say.js';
 export { hear } from './hear.js';
 export { loopback } from './loopback.js';
 export { setHearMuted, isHearMuted } from './mute.js';
+export { setDictionary, setPhoneticCorrection, benchmarkCorrection } from './phonetic.js';
+export type { DictionaryEntry, PhoneticCorrectionOptions } from './phonetic.js';
