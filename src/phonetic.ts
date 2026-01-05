@@ -254,33 +254,35 @@ interface Token {
   isWord: boolean;
   start: number;
   end: number;
-  wordIndex?: number;  // Index among word tokens only
+  wordIndex?: number;      // Index among word tokens only
+  prevWordToken?: Token;   // Direct reference to previous word token
+  nextWordToken?: Token;   // Direct reference to next word token
 }
 
 /**
  * Check if consecutive words match a phrase entry.
  */
-function matchesPhrase(wordTokens: Token[], startIdx: number, phrase: InternalPhraseEntry): boolean {
+function matchesPhrase(wordTokens: Token[], startIndex: number, phrase: InternalPhraseEntry): boolean {
   // Bounds check
-  if (startIdx + phrase.words.length > wordTokens.length) {
+  if (startIndex + phrase.words.length > wordTokens.length) {
     return false;
   }
 
   let totalScore = 0;
 
-  for (let j = 0; j < phrase.words.length; j++) {
-    const inputWord = wordTokens[startIdx + j].word;
+  for (let index = 0; index < phrase.words.length; index++) {
+    const inputWord = wordTokens[startIndex + index].word;
     const inputCodes = getPhonetic(inputWord);
-    const phraseCodes = phrase.phonetics[j];
+    const phraseCodes = phrase.phonetics[index];
 
     // Must be phonetically similar (or prefix match)
-    if (!isPhoneticallySimilar(inputCodes, phraseCodes, inputWord, phrase.words[j])) {
+    if (!isPhoneticallySimilar(inputCodes, phraseCodes, inputWord, phrase.words[index])) {
       return false;
     }
 
     totalScore += scoreMatch(inputWord, inputCodes, {
-      term: phrase.words[j],
-      termLower: phrase.wordsLower[j],
+      term: phrase.words[index],
+      termLower: phrase.wordsLower[index],
       weight: phrase.weight,
       phonetic: phraseCodes,
     });
@@ -302,18 +304,18 @@ function findPhraseMatches(
   const matchedIndices = new Set<number>();
 
   // phraseDict is already sorted by word count descending
-  for (let i = 0; i < wordTokens.length; i++) {
+  for (let index = 0; index < wordTokens.length; index++) {
     // Skip if already part of a longer match
-    if (matchedIndices.has(i)) continue;
+    if (matchedIndices.has(index)) continue;
 
     for (const phrase of phraseDict) {
       // Check if there are enough remaining words
-      if (i + phrase.words.length > wordTokens.length) continue;
+      if (index + phrase.words.length > wordTokens.length) continue;
 
       // Check if any position would overlap with existing match
       let hasOverlap = false;
       for (let k = 0; k < phrase.words.length; k++) {
-        if (matchedIndices.has(i + k)) {
+        if (matchedIndices.has(index + k)) {
           hasOverlap = true;
           break;
         }
@@ -321,11 +323,11 @@ function findPhraseMatches(
       if (hasOverlap) continue;
 
       // Check if words match phrase
-      if (matchesPhrase(wordTokens, i, phrase)) {
-        matches.set(i, { term: phrase.term, wordCount: phrase.words.length });
+      if (matchesPhrase(wordTokens, index, phrase)) {
+        matches.set(index, { term: phrase.term, wordCount: phrase.words.length });
         // Mark all positions as matched
         for (let k = 0; k < phrase.words.length; k++) {
-          matchedIndices.add(i + k);
+          matchedIndices.add(index + k);
         }
         break;  // Found match, move to next position
       }
@@ -470,6 +472,29 @@ export function correctText(text: string, isFinal: boolean): string {
     return text;
   }
 
+  // Build prev/next word token references (O(n) once, enables O(1) lookups)
+  // First pass: link word tokens to each other
+  let lastWordToken: Token | undefined;
+  for (const token of tokens) {
+    if (token.isWord) {
+      if (lastWordToken) {
+        lastWordToken.nextWordToken = token;
+        token.prevWordToken = lastWordToken;
+      }
+      lastWordToken = token;
+    }
+  }
+  // Second pass: set prev/next word refs on non-word tokens
+  lastWordToken = undefined;
+  for (const token of tokens) {
+    if (token.isWord) {
+      lastWordToken = token;
+    } else {
+      token.prevWordToken = lastWordToken;
+      token.nextWordToken = lastWordToken?.nextWordToken;
+    }
+  }
+
   // Get word tokens only
   const wordTokens = tokens.filter(t => t.isWord);
 
@@ -478,14 +503,20 @@ export function correctText(text: string, isFinal: boolean): string {
     ? wordTokens.slice(0, -1)
     : wordTokens;
 
+  // Build wordIndex -> processIdx map for O(1) lookup
+  const wordIndexToProcessIndex = new Map<number, number>();
+  for (const [index, element] of wordsToProcess.entries()) {
+    wordIndexToProcessIndex.set(element.wordIndex!, index);
+  }
+
   // Try phrase matches first (uses wordsToProcess indices)
   const phraseMatches = phraseDict.length > 0 ? findPhraseMatches(wordsToProcess) : new Map();
 
   // Build set of word indices that are part of phrase matches
   const phraseMatchedIndices = new Set<number>();
-  for (const [startIdx, match] of phraseMatches) {
+  for (const [startIndex, match] of phraseMatches) {
     for (let k = 0; k < match.wordCount; k++) {
-      phraseMatchedIndices.add(startIdx + k);
+      phraseMatchedIndices.add(startIndex + k);
     }
   }
 
@@ -497,11 +528,10 @@ export function correctText(text: string, isFinal: boolean): string {
   // Process single words (skip those in phrase matches)
   const singleCorrections = new Map<number, string>();
 
-  for (let i = 0; i < wordsToProcess.length; i++) {
-    const token = wordsToProcess[i];
+  for (const [index, token] of wordsToProcess.entries()) {
 
     // Skip if part of phrase match
-    if (phraseMatchedIndices.has(i)) {
+    if (phraseMatchedIndices.has(index)) {
       continue;
     }
 
@@ -529,18 +559,14 @@ export function correctText(text: string, isFinal: boolean): string {
   for (const token of tokens) {
     if (!token.isWord) {
       // Non-word content: skip only if between phrase words
-      // Need to check if we're between skipFromWordIndex and skipToWordIndex
-      // Look at surrounding word tokens to determine position
-      const prevWordToken = tokens.slice(0, tokens.indexOf(token)).reverse().find(t => t.isWord);
-      const nextWordToken = tokens.slice(tokens.indexOf(token) + 1).find(t => t.isWord);
-
-      const prevIdx = prevWordToken?.wordIndex ?? -1;
-      const nextIdx = nextWordToken?.wordIndex ?? Infinity;
+      // Use O(1) prev/next references instead of O(n) indexOf + slice
+      const previousIndex = token.prevWordToken?.wordIndex ?? -1;
+      const nextIndex = token.nextWordToken?.wordIndex ?? Infinity;
 
       // Skip if this separator is between words that are both part of the same phrase
       // Both prev and next must be IN the phrase (skipToWordIndex is exclusive)
-      if (prevIdx >= skipFromWordIndex && prevIdx < skipToWordIndex &&
-          nextIdx >= skipFromWordIndex && nextIdx < skipToWordIndex) {
+      if (previousIndex >= skipFromWordIndex && previousIndex < skipToWordIndex &&
+          nextIndex >= skipFromWordIndex && nextIndex < skipToWordIndex) {
         continue;
       }
 
@@ -548,22 +574,22 @@ export function correctText(text: string, isFinal: boolean): string {
       continue;
     }
 
-    const wIdx = token.wordIndex!;
+    const wIndex = token.wordIndex!;
 
     // Check if we're skipping this word (part of phrase, not the first word)
-    if (wIdx > skipFromWordIndex && wIdx < skipToWordIndex) {
+    if (wIndex > skipFromWordIndex && wIndex < skipToWordIndex) {
       continue;
     }
 
-    // Check if this starts a phrase match
-    const processIdx = wordsToProcess.findIndex(t => t.wordIndex === wIdx);
-    if (processIdx >= 0 && phraseMatches.has(processIdx)) {
-      const match = phraseMatches.get(processIdx)!;
+    // Check if this starts a phrase match (O(1) lookup instead of O(n) findIndex)
+    const processIndex = wordIndexToProcessIndex.get(wIndex) ?? -1;
+    if (processIndex >= 0 && phraseMatches.has(processIndex)) {
+      const match = phraseMatches.get(processIndex)!;
       result += match.term;
       // Set skip range for subsequent words in phrase
-      skipFromWordIndex = wIdx;
-      const lastPhraseWordIdx = wordsToProcess[processIdx + match.wordCount - 1]?.wordIndex ?? wIdx;
-      skipToWordIndex = lastPhraseWordIdx + 1;
+      skipFromWordIndex = wIndex;
+      const lastPhraseWordIndex = wordsToProcess[processIndex + match.wordCount - 1]?.wordIndex ?? wIndex;
+      skipToWordIndex = lastPhraseWordIndex + 1;
       continue;
     }
 

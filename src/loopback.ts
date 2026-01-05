@@ -6,8 +6,11 @@ import { killProcess } from './utilities.js';
  * Speak text via TTS and return what STT transcribes.
  * Used for testing STT accuracy by creating a loopback from speaker to microphone.
  *
+ * Note: This spawns its own independent hear process (not using hear()) because
+ * hear() stops listening when TTS starts. Loopback needs to listen DURING TTS.
+ *
  * @param text - The text to speak
- * @param timeoutMs - Silence timeout in ms after TTS finishes (default: 1200)
+ * @param timeoutMs - Silence timeout in ms after TTS finishes (default: 1800)
  * @param onLine - Optional callback for each line (text, final) - matches hear() pattern
  * @returns The transcribed text (empty string if nothing heard)
  */
@@ -21,18 +24,18 @@ export async function loopback(
     let silenceTimer: NodeJS.Timeout | undefined;
     let ttsFinished = false;
 
-    // Spawn hear process
-    const hearProc = spawn('hear', [], {
+    // Spawn independent hear process (not subject to onSayStarted shutdown)
+    const hearProcess = spawn('hear', [], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     // Drain stderr
-    hearProc.stderr?.resume();
+    hearProcess.stderr?.resume();
 
     let resolved = false;
 
     // Handle hear errors
-    hearProc.on('error', () => {
+    hearProcess.on('error', () => {
       if (resolved) return;
       resolved = true;
       cleanup();
@@ -45,8 +48,8 @@ export async function loopback(
         clearTimeout(silenceTimer);
         silenceTimer = undefined;
       }
-      if (hearProc && !hearProc.killed) {
-        killProcess(hearProc);
+      if (hearProcess && !hearProcess.killed) {
+        killProcess(hearProcess);
       }
     };
 
@@ -71,7 +74,7 @@ export async function loopback(
 
     // Process hear output
     let lineBuffer = '';
-    hearProc.stdout!.on('data', (chunk: Buffer) => {
+    hearProcess.stdout!.on('data', (chunk: Buffer) => {
       lineBuffer += chunk.toString();
       const lines = lineBuffer.split('\n');
       lineBuffer = lines.pop() || '';
@@ -85,7 +88,7 @@ export async function loopback(
       }
     });
 
-    hearProc.on('exit', () => {
+    hearProcess.on('exit', () => {
       // If hear exits unexpectedly, return what we have
       if (resolved) return;
       resolved = true;

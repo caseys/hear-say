@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, signalGapSpeechComplete } from './say.js';
 import { killProcess, debug as debugLog } from './utilities.js';
 import { isHearMuted, onMuteChange } from './mute.js';
-import { correctText, clearCaches } from './phonetic.js';
+import { correctText } from './phonetic.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[hear]', ...arguments_);
@@ -155,7 +155,6 @@ function startListening(): void {
   lastTranscribedText = '';
   shouldContinueListening = true;
   suppressCallbacks = false;  // Re-enable callbacks when intentionally starting
-  clearCaches(); // Fresh phonetic caches for new utterance
 
   activeProcess = spawn('hear', [], {
     stdio: ['ignore', 'pipe', 'pipe'],

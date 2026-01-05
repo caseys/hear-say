@@ -117,7 +117,7 @@ const heard = await loopback("Hello world", 1200, (text, final) => {
 | Argument | Type | Description |
 |----------|------|-------------|
 | `text` | `string` | The text to speak |
-| `timeoutMs` | `number` | Silence timeout in ms (default: 1200) |
+| `timeoutMs` | `number` | Silence timeout in ms (default: 1800) |
 | `onLine` | `(text: string, final: boolean) => void` | Optional streaming callback |
 
 ## Configuration

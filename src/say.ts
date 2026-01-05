@@ -116,10 +116,10 @@ function reduceRepetition(newText: string, lastText: string): string | undefined
   }
   // Check if both texts have matching word structure at the boundary
   if (suffixLength > 0) {
-    const newIdx = newText.length - suffixLength - 1;
-    const lastIdx = lastText.length - suffixLength - 1;
-    const newAtBoundary = newIdx < 0 || !/\w/.test(newText[newIdx]);
-    const lastAtBoundary = lastIdx < 0 || !/\w/.test(lastText[lastIdx]);
+    const newIndex = newText.length - suffixLength - 1;
+    const lastIndex = lastText.length - suffixLength - 1;
+    const newAtBoundary = newIndex < 0 || !/\w/.test(newText[newIndex]);
+    const lastAtBoundary = lastIndex < 0 || !/\w/.test(lastText[lastIndex]);
     if (newAtBoundary !== lastAtBoundary) {
       // Word structure differs - don't strip this suffix
       suffixLength = 0;
