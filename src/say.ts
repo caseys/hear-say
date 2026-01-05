@@ -1,9 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { killProcess, debug as debugLog } from './utilities.js';
 
-// Re-export setDebug for public API
-export { setDebug } from './utilities.js';
-
 function debug(...arguments_: unknown[]): void {
   debugLog('[say]', ...arguments_);
 }
@@ -55,7 +52,7 @@ let pendingInterrupt: PendingInterrupt | undefined;
 // Speech rate configuration (words per minute) - configurable via env vars
 const MIN_RATE = Number(process.env.MIN_RATE) || 200;
 const MAX_RATE = Number(process.env.MAX_RATE) || 300;
-const WORD_THRESHOLD = Number(process.env.WORD_QUEUE_PLATEAU) || 30;
+const WORD_THRESHOLD = Number(process.env.WORD_QUEUE_PLATEAU) || 50;
 const VOICE = process.env.VOICE || '';
 
 function calculateRate(currentText: string): number {
@@ -87,9 +84,21 @@ function reduceRepetition(newText: string, lastText: string): string | undefined
   while (prefixLength > 0 && /\w/.test(newText[prefixLength - 1]) && /\w/.test(newText[prefixLength] || '')) {
     prefixLength--;
   }
+  // Check if both texts have matching word structure at the boundary
+  // e.g., "I can" vs "Initializing" - "I" is a word in first but part of word in second
+  if (prefixLength > 0) {
+    const newAtBoundary = !/\w/.test(newText[prefixLength] || '');
+    const lastAtBoundary = !/\w/.test(lastText[prefixLength] || '');
+    if (newAtBoundary !== lastAtBoundary) {
+      // Word structure differs - don't strip this prefix
+      prefixLength = 0;
+    }
+  }
   // Extend prefix to include trailing punctuation/whitespace
-  while (prefixLength < newText.length && /[^\w]/.test(newText[prefixLength])) {
-    prefixLength++;
+  if (prefixLength > 0) {
+    while (prefixLength < newText.length && /[^\w]/.test(newText[prefixLength])) {
+      prefixLength++;
+    }
   }
 
   // Find character-level common suffix (don't overlap with prefix)
@@ -105,9 +114,22 @@ function reduceRepetition(newText: string, lastText: string): string | undefined
          /\w/.test(newText[newText.length - suffixLength - 1] || '')) {
     suffixLength--;
   }
+  // Check if both texts have matching word structure at the boundary
+  if (suffixLength > 0) {
+    const newIdx = newText.length - suffixLength - 1;
+    const lastIdx = lastText.length - suffixLength - 1;
+    const newAtBoundary = newIdx < 0 || !/\w/.test(newText[newIdx]);
+    const lastAtBoundary = lastIdx < 0 || !/\w/.test(lastText[lastIdx]);
+    if (newAtBoundary !== lastAtBoundary) {
+      // Word structure differs - don't strip this suffix
+      suffixLength = 0;
+    }
+  }
   // Extend suffix to include leading punctuation/whitespace
-  while (suffixLength < newText.length - prefixLength && /[^\w]/.test(newText[newText.length - 1 - suffixLength])) {
-    suffixLength++;
+  if (suffixLength > 0) {
+    while (suffixLength < newText.length - prefixLength && /[^\w]/.test(newText[newText.length - 1 - suffixLength])) {
+      suffixLength++;
+    }
   }
 
   const result = newText.slice(prefixLength, newText.length - suffixLength).trim();
@@ -327,6 +349,16 @@ async function processQueue(): Promise<void> {
  * - latest: Only the last call wins. Combine with interrupt/clear to control position.
  */
 export function say(text: string | false, options?: SayOptions): Promise<void> {
+  // Log every call with text preview and options
+  if (text === false) {
+    debug('say(false) called');
+  } else if (text === '') {
+    debug('say("") called - no-op');
+  } else {
+    const preview = text.length > 40 ? text.slice(0, 40) + '...' : text;
+    debug(`say("${preview}")`, options ? JSON.stringify(options) : '');
+  }
+
   // Empty strings are no-ops (avoid spawning process with no text)
   if (text === '') {
     return Promise.resolve();
