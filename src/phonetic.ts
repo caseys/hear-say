@@ -1,5 +1,6 @@
 import { doubleMetaphone } from 'phonetics';
 import { removeStopwords } from 'stopword';
+import { syllable } from 'syllable';
 import { debug as debugLog } from './utilities.js';
 
 function debug(...arguments_: unknown[]): void {
@@ -56,6 +57,8 @@ let options: PhoneticCorrectionOptions = {
 const phoneticCache = new Map<string, [string, string]>();
 // Cache: key=wordLower, value=correction or empty string for "no correction found"
 const correctionCache = new Map<string, string>();
+// Cache: key=wordLower, value=syllable count
+const syllableCache = new Map<string, number>();
 
 /**
  * Simple Levenshtein distance implementation.
@@ -172,6 +175,26 @@ function prefixBonus(word: string, term: string): number {
 }
 
 /**
+ * Get syllable count with caching.
+ */
+function getSyllableCount(word: string): number {
+  const lower = word.toLowerCase();
+  if (!syllableCache.has(lower)) {
+    syllableCache.set(lower, syllable(lower));
+  }
+  return syllableCache.get(lower)!;
+}
+
+/**
+ * Syllable bonus: reward matching syllable count.
+ */
+function syllableBonus(word: string, term: string): number {
+  const wordSyllables = getSyllableCount(word);
+  const termSyllables = getSyllableCount(term);
+  return wordSyllables === termSyllables ? 0.1 : 0;
+}
+
+/**
  * Compute combined match score.
  */
 function scoreMatch(word: string, wordCodes: [string, string], entry: InternalDictEntry): number {
@@ -181,9 +204,10 @@ function scoreMatch(word: string, wordCodes: [string, string], entry: InternalDi
   const maxLength = Math.max(wordLower.length, entry.termLower.length);
   const tScore = maxLength > 0 ? 1 - distribution / maxLength : 0;
 
-  // 45% phonetic + 45% text + 10% weight + prefix bonus
+  // 45% phonetic + 45% text + 10% weight + prefix/syllable bonuses
   let score = pScore * 0.45 + tScore * 0.45 + entry.weight * 0.1;
   score += prefixBonus(word, entry.term);
+  score += syllableBonus(word, entry.term);
   return score;
 }
 
@@ -412,6 +436,7 @@ export function setPhoneticCorrection(options_: PhoneticCorrectionOptions): void
 export function clearCaches(): void {
   phoneticCache.clear();
   correctionCache.clear();
+  syllableCache.clear();
 }
 
 /**

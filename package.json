@@ -52,7 +52,8 @@
   ],
   "dependencies": {
     "phonetics": "^1.0.5",
-    "stopword": "^3.1.1"
+    "stopword": "^3.1.1",
+    "syllable": "^5.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
