@@ -153,8 +153,22 @@ function isPhoneticallySimilar(
 function prefixBonus(word: string, term: string): number {
   const w = word.toLowerCase();
   const t = term.toLowerCase();
-  if (w.slice(0, 3) === t.slice(0, 3)) return 0.15;
-  if (w.slice(0, 2) === t.slice(0, 2)) return 0.08;
+  if (w.slice(0, 3) === t.slice(0, 3)) return 0.075;
+  if (w.slice(0, 2) === t.slice(0, 2)) return 0.05;
+  return 0;
+}
+
+/**
+ * Phonetic prefix bonus: reward matching first phonetic character.
+ */
+function phoneticPrefixBonus(wordCodes: [string, string], termCodes: [string, string]): number {
+  for (const c1 of wordCodes) {
+    if (!c1) continue;
+    for (const c2 of termCodes) {
+      if (!c2) continue;
+      if (c1[0] === c2[0]) return 0.1;
+    }
+  }
   return 0;
 }
 
@@ -188,9 +202,10 @@ function scoreMatch(word: string, wordCodes: [string, string], entry: InternalDi
   const maxLength = Math.max(wordLower.length, entry.termLower.length);
   const tScore = maxLength > 0 ? 1 - distribution / maxLength : 0;
 
-  // 45% phonetic + 45% text + 10% weight + prefix/syllable bonuses
+  // 45% phonetic + 45% text + 10% weight + bonuses
   let score = pScore * 0.45 + tScore * 0.45 + entry.weight * 0.1;
   score += prefixBonus(word, entry.term);
+  score += phoneticPrefixBonus(wordCodes, entry.phonetic);
   score += syllableBonus(word, entry.term);
   return score;
 }
