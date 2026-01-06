@@ -131,35 +131,19 @@ function phoneticScore(wordCodes: [string, string], dictCodes: [string, string])
 
 /**
  * Check if two words are phonetically similar (within threshold).
- * Requires BOTH phonetic similarity AND prefix match for better accuracy.
  */
 function isPhoneticallySimilar(
   wordCodes: [string, string],
-  dictCodes: [string, string],
-  word?: string,
-  dictTerm?: string
+  dictCodes: [string, string]
 ): boolean {
-  // Check prefix match first (required)
-  if (!word || !dictTerm) {
-    return false;
-  }
-  const w = word.toLowerCase();
-  const t = dictTerm.toLowerCase();
-  const hasPrefix = w.length >= 2 && t.length >= 2 && w.slice(0, 2) === t.slice(0, 2);
-  if (!hasPrefix) {
-    return false;
-  }
-
-  // Check phonetic similarity (with relaxed threshold since prefix already matched)
   for (const c1 of wordCodes) {
     if (!c1) continue;
     for (const c2 of dictCodes) {
       if (!c2) continue;
       if (c1 === c2) return true;
-      if (levenshtein(c1, c2) <= 2) return true;  // Relaxed from 1 to 2
+      if (levenshtein(c1, c2) <= 2) return true;
     }
   }
-
   return false;
 }
 
@@ -250,7 +234,7 @@ function findBestMatch(word: string): string | undefined {
 
   for (const entry of dictionary) {
     // Filter: only consider phonetically similar words (or prefix matches)
-    if (!isPhoneticallySimilar(wordCodes, entry.phonetic, word, entry.term)) {
+    if (!isPhoneticallySimilar(wordCodes, entry.phonetic)) {
       continue;
     }
 
@@ -300,7 +284,7 @@ function matchesPhrase(wordTokens: Token[], startIndex: number, phrase: Internal
     const phraseCodes = phrase.phonetics[index];
 
     // Must be phonetically similar (or prefix match)
-    if (!isPhoneticallySimilar(inputCodes, phraseCodes, inputWord, phrase.words[index])) {
+    if (!isPhoneticallySimilar(inputCodes, phraseCodes)) {
       return false;
     }
 
