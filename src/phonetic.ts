@@ -1,7 +1,12 @@
+import { createRequire } from 'node:module';
 import { doubleMetaphone } from 'phonetics';
-import { removeStopwords } from 'stopword';
 import { syllable } from 'syllable';
 import { debug as debugLog } from './utilities.js';
+
+// Load stopwords-en (JSON module)
+const require = createRequire(import.meta.url);
+const stopwordsEn: string[] = require('stopwords-en');
+const stopwordSet = new Set(stopwordsEn.map((w: string) => w.toLowerCase()));
 
 function debug(...arguments_: unknown[]): void {
   if (options.debug) {
@@ -49,7 +54,7 @@ let options: PhoneticCorrectionOptions = {
   enabled: true,
   onFinal: true,
   onStreaming: true,  // Fast enough to run on all callbacks
-  minScore: 0.65,
+  minScore: 0.72,
   debug: false,
 };
 
@@ -148,25 +153,25 @@ function isPhoneticallySimilar(
 }
 
 /**
- * Prefix bonus: reward matching first 2-3 characters.
+ * Prefix bonus: reward matching prefixes (mutually exclusive, pick highest).
+ * - 3-char text prefix: +0.10
+ * - 2-char text prefix: +0.075
+ * - 1-char phonetic prefix: +0.05
  */
-function prefixBonus(word: string, term: string): number {
+function prefixBonus(word: string, term: string, wordCodes: [string, string], termCodes: [string, string]): number {
   const w = word.toLowerCase();
   const t = term.toLowerCase();
-  if (w.slice(0, 3) === t.slice(0, 3)) return 0.075;
-  if (w.slice(0, 2) === t.slice(0, 2)) return 0.05;
-  return 0;
-}
 
-/**
- * Phonetic prefix bonus: reward matching first phonetic character.
- */
-function phoneticPrefixBonus(wordCodes: [string, string], termCodes: [string, string]): number {
+  // Check text prefix (highest priority)
+  if (w.slice(0, 3) === t.slice(0, 3)) return 0.1;
+  if (w.slice(0, 2) === t.slice(0, 2)) return 0.075;
+
+  // Fall back to phonetic prefix
   for (const c1 of wordCodes) {
     if (!c1) continue;
     for (const c2 of termCodes) {
       if (!c2) continue;
-      if (c1[0] === c2[0]) return 0.1;
+      if (c1[0] === c2[0]) return 0.05;
     }
   }
   return 0;
@@ -185,10 +190,12 @@ function getSyllableCount(word: string): number {
 
 /**
  * Syllable bonus: reward matching syllable count.
+ * Skip for single-syllable words - too common to be useful.
  */
 function syllableBonus(word: string, term: string): number {
   const wordSyllables = getSyllableCount(word);
   const termSyllables = getSyllableCount(term);
+  if (wordSyllables === 1 && termSyllables === 1) return 0;
   return wordSyllables === termSyllables ? 0.1 : 0;
 }
 
@@ -202,11 +209,16 @@ function scoreMatch(word: string, wordCodes: [string, string], entry: InternalDi
   const maxLength = Math.max(wordLower.length, entry.termLower.length);
   const tScore = maxLength > 0 ? 1 - distribution / maxLength : 0;
 
-  // 45% phonetic + 45% text + 10% weight + bonuses
-  let score = pScore * 0.45 + tScore * 0.45 + entry.weight * 0.1;
-  score += prefixBonus(word, entry.term);
-  score += phoneticPrefixBonus(wordCodes, entry.phonetic);
+  // 50% phonetic + 40% text + 5% weight + bonuses
+  let score = pScore * 0.50 + tScore * 0.40 + entry.weight * 0.05;
+  score += prefixBonus(word, entry.term, wordCodes, entry.phonetic);
   score += syllableBonus(word, entry.term);
+
+  // Dominance bonus: reward when phonetic >> text (true phonetic match)
+  if (pScore - tScore > 0.3) {
+    score += 0.05;
+  }
+
   return score;
 }
 
@@ -544,10 +556,12 @@ export function correctText(text: string, isFinal: boolean): string {
     }
   }
 
-  // Identify stopwords for single-word matching
-  const words = wordsToProcess.map(t => t.word);
-  const filtered = removeStopwords(words) as string[];
-  const filteredSet = new Set(filtered.map(w => w.toLowerCase()));
+  // Identify non-stopwords for single-word matching
+  const nonStopwords = new Set(
+    wordsToProcess
+      .map(t => t.word.toLowerCase())
+      .filter(w => !stopwordSet.has(w))
+  );
 
   // Process single words (skip those in phrase matches)
   const singleCorrections = new Map<number, string>();
@@ -560,7 +574,7 @@ export function correctText(text: string, isFinal: boolean): string {
     }
 
     // Skip if it's a stopword
-    if (!filteredSet.has(token.word.toLowerCase())) {
+    if (!nonStopwords.has(token.word.toLowerCase())) {
       continue;
     }
 
