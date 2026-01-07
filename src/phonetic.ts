@@ -210,7 +210,7 @@ function scoreMatch(word: string, wordCodes: [string, string], entry: InternalDi
   const tScore = maxLength > 0 ? 1 - distribution / maxLength : 0;
 
   // 50% phonetic + 40% text + 5% weight + bonuses
-  let score = pScore * 0.50 + tScore * 0.40 + entry.weight * 0.05;
+  let score = pScore * 0.5 + tScore * 0.4 + entry.weight * 0.05;
   score += prefixBonus(word, entry.term, wordCodes, entry.phonetic);
   score += syllableBonus(word, entry.term);
 
@@ -451,22 +451,9 @@ export function clearCaches(): void {
 }
 
 /**
- * Correct text using phonetic matching against dictionary.
+ * Correct a single segment of text (no [[...]] tags).
  */
-export function correctText(text: string, isFinal: boolean): string {
-  // Check if enabled
-  if (!options.enabled || (singleWordDict.length === 0 && phraseDict.length === 0)) {
-    return text;
-  }
-
-  // Check if we should process based on final/streaming setting
-  if (isFinal && !options.onFinal) {
-    return text;
-  }
-  if (!isFinal && !options.onStreaming) {
-    return text;
-  }
-
+function correctSegment(text: string, isFinal: boolean): string {
   // Tokenize preserving structure
   const tokens: Token[] = [];
   const wordRegex = /\b\w+\b/g;
@@ -636,7 +623,51 @@ export function correctText(text: string, isFinal: boolean): string {
     result += correction ?? token.word;
   }
 
-  debug(`corrected: "${text}" -> "${result}"`);
+  return result;
+}
+
+/**
+ * Correct text using phonetic matching against dictionary.
+ * Preserves Apple speech command tags [[...]] unchanged.
+ */
+export function correctText(text: string, isFinal: boolean): string {
+  // Check if enabled
+  if (!options.enabled || (singleWordDict.length === 0 && phraseDict.length === 0)) {
+    return text;
+  }
+
+  // Check if we should process based on final/streaming setting
+  if (isFinal && !options.onFinal) {
+    return text;
+  }
+  if (!isFinal && !options.onStreaming) {
+    return text;
+  }
+
+  // Split preserving [[...]] tags
+  const segments = text.split(/(\[\[.*?\]\])/g);
+
+  // If no tags found, process directly
+  if (segments.length === 1) {
+    const result = correctSegment(text, isFinal);
+    if (result !== text) {
+      debug(`corrected: "${text}" -> "${result}"`);
+    }
+    return result;
+  }
+
+  // Process only non-tag segments
+  const correctedSegments = segments.map(segment => {
+    if (segment.startsWith('[[') && segment.endsWith(']]')) {
+      return segment; // Preserve tag as-is
+    }
+    return correctSegment(segment, isFinal);
+  });
+
+  const result = correctedSegments.join('');
+  if (result !== text) {
+    debug(`corrected: "${text}" -> "${result}"`);
+  }
   return result;
 }
 

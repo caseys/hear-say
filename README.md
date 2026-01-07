@@ -40,6 +40,8 @@ say(false);                // stop speaking and clear queue
 | `clear` | Clear queue and speak next (implies interrupt) |
 | `rude` | Cut off current speaker immediately |
 | `latest` | Only the last call with this flag wins (supersedes previous) |
+| `volume` | Set volume via `[[volm X]]` tag (e.g., 0.5, "+0.1", "-0.2") |
+| `pitch` | Set pitch via `[[pbas X]]` tag (semitones) |
 
 Options can be combined. For example:
 - `{ rude: true, clear: true }` - cut off speaker AND clear queue
@@ -58,6 +60,11 @@ say("Starting over", { clear: true });
 // Latest wins: only the last call is spoken when its turn comes
 say("Status: loading...", { latest: true });
 say("Status: complete!", { latest: true });  // replaces previous
+
+// Speech modifiers: adjust volume and pitch
+say("Whisper this", { volume: "-0.5" });
+say("Higher pitch", { pitch: 50 });
+say("Loud and low", { volume: "+0.3", pitch: -20 });
 ```
 
 ### `hear(callback, timeoutMs?): void`
@@ -217,6 +224,27 @@ const unregister = onSayStarted(() => {
 | `onSayFinished(cb)` | Speech queue is empty |
 | `onSayGapStart(cb)` | Gap begins between queue items |
 | `onSayGapEnd(cb)` | Gap ends, speech resuming |
+
+
+### Apple's Embedded Speech Commands
+
+Apple's `say` command supports inline speech control tags. These tags pass through phonetic correction unchanged.
+
+| Tag | Effect |
+|-----|--------|
+| `[[slnc 500]]` | Pause for 500 milliseconds |
+| `[[volm +0.1]]` | Adjust volume (relative or absolute) |
+| `[[rate 150]]` | Set speech rate (words per minute) |
+| `[[pbas 50]]` | Adjust pitch (semitones) |
+| `[[rset]]` | Reset parameters to default |
+
+Example:
+```
+"Hello, world! [[slnc 500]] After delay. [[volm -0.5]] Quieter. [[pbas 30]] Higher pitch. [[rset]] Normal."
+```
+
+When using `volume` or `pitch` options in `say()`, tags are auto-inserted and `[[rset]]` is appended.
+
 
 ### Phonetic Correction
 

@@ -38,11 +38,27 @@ export interface SayOptions {
   clear?: boolean;      // Clear the queue (implies interrupt)
   rude?: boolean;       // Cut off current speaker immediately, speak now; interrupted text is rescheduled after
   latest?: boolean;     // Only the last call with this flag wins (supersedes previous)
+  // Apple speech tag options - prepends tags, appends [[rset]]
+  volume?: number | string;  // [[volm X]] - e.g., 0.5, "+0.1", "-0.2"
+  pitch?: number;            // [[pbas X]] - semitones
 }
 
 // Pending interrupt entry (only one, newer calls supersede)
 interface PendingInterrupt extends QueueEntry {
   clear: boolean;
+}
+
+/**
+ * Apply Apple speech tags based on options.
+ * Prepends [[volm X]] and/or [[pbas X]], appends [[rset]] if any tags used.
+ */
+function applySpeechTags(text: string, options: SayOptions): string {
+  const tags: string[] = [];
+  if (options.volume !== undefined) tags.push(`[[volm ${options.volume}]]`);
+  if (options.pitch !== undefined) tags.push(`[[pbas ${options.pitch}]]`);
+
+  if (tags.length === 0) return text;
+  return `${tags.join(' ')} ${text} [[rset]]`;
 }
 
 // Track the current "latest" queue entry (if any) - for latest without interrupt
@@ -406,6 +422,10 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
   }
 
   const sayOptions = options ?? {};
+
+  // Apply speech tags if volume or pitch specified
+  const processedText = applySpeechTags(text, sayOptions);
+
   const isInterrupt = sayOptions.rude || sayOptions.clear || sayOptions.interrupt;
 
   if (isInterrupt) {
@@ -438,7 +458,7 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
       processingQueue = false;
 
       // Insert at front of queue (before other queued items)
-      const entry = { text, resolve: () => {} };
+      const entry = { text: processedText, resolve: () => {} };
       return new Promise((resolve) => {
         entry.resolve = resolve;
         // Track as latest if flag set
@@ -468,7 +488,7 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
         pendingInterrupt.resolve();  // Supersede previous
       }
       return new Promise((resolve) => {
-        pendingInterrupt = { text, resolve, clear: !!sayOptions.clear };
+        pendingInterrupt = { text: processedText, resolve, clear: !!sayOptions.clear };
         // If nothing is processing, start now
         if (!processingQueue) {
           processQueue();
@@ -482,7 +502,7 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
     if (latestEntry) {
       // Replace existing latest entry in place
       latestEntry.resolve();  // Resolve old promise (superseded)
-      latestEntry.text = text;  // Update text
+      latestEntry.text = processedText;  // Update text
       // Return new promise for caller
       return new Promise((resolve) => {
         latestEntry!.resolve = resolve;
@@ -494,7 +514,7 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
     } else {
       // Add new latest entry at end
       return new Promise((resolve) => {
-        latestEntry = { text, resolve };
+        latestEntry = { text: processedText, resolve };
         speechQueue.push(latestEntry);
         processQueue();
       });
@@ -503,7 +523,7 @@ export function say(text: string | false, options?: SayOptions): Promise<void> {
 
   // Normal queue behavior
   return new Promise((resolve) => {
-    speechQueue.push({ text, resolve });
+    speechQueue.push({ text: processedText, resolve });
     processQueue();
   });
 }
