@@ -218,6 +218,73 @@ const unregister = onSayStarted(() => {
 | `onSayGapStart(cb)` | Gap begins between queue items |
 | `onSayGapEnd(cb)` | Gap ends, speech resuming |
 
+### Phonetic Correction
+
+The library includes a phonetic correction system that maps misrecognized words to a custom dictionary. This is useful when STT doesn't know domain-specific terms (game names, technical jargon, etc.).
+
+```ts
+import {
+  setDictionary,
+  setPhoneticCorrection,
+  correctText
+} from 'hear-say';
+
+// Set up dictionary of domain terms (ordered by priority)
+setDictionary(['Kerbin', 'Mun', 'Minmus', 'Duna', 'Jool']);
+
+// Or with explicit weights
+setDictionary([
+  { term: 'Kerbin', weight: 1.0 },
+  { term: 'Mun', weight: 0.9 },
+]);
+
+// Configure behavior
+setPhoneticCorrection({
+  enabled: true,      // Enable/disable correction
+  onFinal: true,      // Apply to final utterances
+  onStreaming: true,  // Apply to streaming updates
+  minScore: 0.72,     // Minimum match score (0-1)
+  debug: false,       // Log match details
+});
+
+// Manual correction (automatic when dictionary is set)
+const corrected = correctText("I'm orbiting carbon", true);
+// -> "I'm orbiting Kerbin"
+```
+
+#### How It Works
+
+The system uses multiple signals to score potential matches:
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Phonetic similarity | 50% | Double Metaphone encoding comparison |
+| Text similarity | 40% | Levenshtein edit distance |
+| Dictionary order | 5% | Earlier terms score slightly higher |
+| Prefix bonus | +0.10 max | Matching first 2-3 characters |
+| Syllable bonus | +0.10 | Matching syllable count (multi-syllable only) |
+| Dominance bonus | +0.05 | When phonetic >> text (true phonetic match) |
+
+**Key insight**: When STT mishears a word, it picks something that *sounds* similar but may be *spelled* differently. The "dominance bonus" rewards this pattern—high phonetic similarity with lower text similarity indicates a true phonetic substitution rather than coincidental word similarity.
+
+#### Multi-word Phrases
+
+Dictionary terms with underscores or spaces are matched as phrases:
+
+```ts
+setDictionary(['match_planes', 'rescue_kerbal']);
+
+correctText("match planes");  // -> "match_planes"
+```
+
+#### Stopwords
+
+Common English words (1,298 from stopwords-en) are skipped during correction to avoid false positives on words like "please", "what", "the", etc.
+
+#### Limitations
+
+The phonetic algorithms are English-specific (Double Metaphone, English syllabification rules). Multi-language support would require language detection and per-language phonetic encoders.
+
 ## License
 
 MIT
