@@ -451,9 +451,29 @@ export function clearCaches(): void {
 }
 
 /**
+ * Replace Apple speech tags with spaces (same length) so indices stay aligned.
+ */
+function maskSpeechTags(text: string): string {
+  if (!text.includes('[[')) {
+    return text;
+  }
+
+  return text.replace(/\[\[[\s\S]*?\]\]/g, match => ' '.repeat(match.length));
+}
+
+/**
+ * Check if a string contains an Apple speech tag.
+ */
+function containsSpeechTag(text: string): boolean {
+  return text.includes('[[') && /\[\[[\s\S]*?\]\]/.test(text);
+}
+
+/**
  * Correct a single segment of text (no [[...]] tags).
  */
 function correctSegment(text: string, isFinal: boolean): string {
+  const textForMatching = maskSpeechTags(text);
+
   // Tokenize preserving structure
   const tokens: Token[] = [];
   const wordRegex = /\b\w+\b/g;
@@ -461,7 +481,7 @@ function correctSegment(text: string, isFinal: boolean): string {
   let lastEnd = 0;
   let wordIndex = 0;
 
-  while ((match = wordRegex.exec(text)) !== null) {
+  while ((match = wordRegex.exec(textForMatching)) !== null) {
     // Add any non-word content before this word
     if (match.index > lastEnd) {
       tokens.push({
@@ -521,10 +541,7 @@ function correctSegment(text: string, isFinal: boolean): string {
   // Get word tokens only
   const wordTokens = tokens.filter(t => t.isWord);
 
-  // Skip last word if streaming (may be partial)
-  const wordsToProcess = !isFinal && wordTokens.length > 1
-    ? wordTokens.slice(0, -1)
-    : wordTokens;
+  const wordsToProcess = wordTokens;
 
   // Build wordIndex -> processIdx map for O(1) lookup
   const wordIndexToProcessIndex = new Map<number, number>();
@@ -587,11 +604,19 @@ function correctSegment(text: string, isFinal: boolean): string {
       // Use O(1) prev/next references instead of O(n) indexOf + slice
       const previousIndex = token.prevWordToken?.wordIndex ?? -1;
       const nextIndex = token.nextWordToken?.wordIndex ?? Infinity;
+      const betweenPhraseWords =
+        previousIndex >= skipFromWordIndex && previousIndex < skipToWordIndex &&
+        nextIndex >= skipFromWordIndex && nextIndex < skipToWordIndex;
 
       // Skip if this separator is between words that are both part of the same phrase
       // Both prev and next must be IN the phrase (skipToWordIndex is exclusive)
-      if (previousIndex >= skipFromWordIndex && previousIndex < skipToWordIndex &&
-          nextIndex >= skipFromWordIndex && nextIndex < skipToWordIndex) {
+      if (betweenPhraseWords) {
+        if (containsSpeechTag(token.word)) {
+          const trimmedTag = token.word.replace(/\s+$/, '');
+          if (trimmedTag) {
+            result += trimmedTag;
+          }
+        }
         continue;
       }
 
@@ -623,12 +648,15 @@ function correctSegment(text: string, isFinal: boolean): string {
     result += correction ?? token.word;
   }
 
+  if (result !== text && !/\s$/.test(text) && /\s$/.test(result)) {
+    result = result.trimEnd();
+  }
+
   return result;
 }
 
 /**
  * Correct text using phonetic matching against dictionary.
- * Preserves Apple speech command tags [[...]] unchanged.
  */
 export function correctText(text: string, isFinal: boolean): string {
   // Check if enabled
@@ -644,27 +672,7 @@ export function correctText(text: string, isFinal: boolean): string {
     return text;
   }
 
-  // Split preserving [[...]] tags
-  const segments = text.split(/(\[\[.*?\]\])/g);
-
-  // If no tags found, process directly
-  if (segments.length === 1) {
-    const result = correctSegment(text, isFinal);
-    if (result !== text) {
-      debug(`corrected: "${text}" -> "${result}"`);
-    }
-    return result;
-  }
-
-  // Process only non-tag segments
-  const correctedSegments = segments.map(segment => {
-    if (segment.startsWith('[[') && segment.endsWith(']]')) {
-      return segment; // Preserve tag as-is
-    }
-    return correctSegment(segment, isFinal);
-  });
-
-  const result = correctedSegments.join('');
+  const result = correctSegment(text, isFinal);
   if (result !== text) {
     debug(`corrected: "${text}" -> "${result}"`);
   }
