@@ -458,7 +458,7 @@ function maskSpeechTags(text: string): string {
     return text;
   }
 
-  return text.replace(/\[\[[\s\S]*?\]\]/g, match => ' '.repeat(match.length));
+  return text.replaceAll(/\[\[[\s\S]*?\]\]/g, match => ' '.repeat(match.length));
 }
 
 /**
@@ -471,7 +471,7 @@ function containsSpeechTag(text: string): boolean {
 /**
  * Correct a single segment of text (no [[...]] tags).
  */
-function correctSegment(text: string, isFinal: boolean): string {
+function correctSegment(text: string): string {
   const textForMatching = maskSpeechTags(text);
 
   // Tokenize preserving structure
@@ -672,7 +672,7 @@ export function correctText(text: string, isFinal: boolean): string {
     return text;
   }
 
-  const result = correctSegment(text, isFinal);
+  const result = correctSegment(text);
   if (result !== text) {
     debug(`corrected: "${text}" -> "${result}"`);
   }

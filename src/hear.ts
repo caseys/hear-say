@@ -3,6 +3,7 @@ import { isSpeaking, onSayStarted, onSayFinished, onSayGapStart, onSayGapEnd, si
 import { killProcess, debug as debugLog } from './utilities.js';
 import { isHearMuted, onMuteChange } from './mute.js';
 import { correctText } from './phonetic.js';
+import { createLineParser } from './line-parser.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[hear]', ...arguments_);
@@ -173,31 +174,20 @@ function startListening(): void {
     clearSilenceTimer();
   });
 
-  let lineBuffer = '';
+  const handleLine = createLineParser((line) => {
+    lastTranscribedText = line;
+    resetSilenceTimer();
+    if (currentCallback && !isHearMuted() && !suppressCallbacks) {
+      currentCallback(correctText(line, false), stopListening, false);
+    }
+  });
 
   proc.stdout!.on('data', (chunk: Buffer) => {
-    // Ignore data from stale processes
     if (myGeneration !== hearGeneration) {
       return;
     }
 
-    // Handle partial chunks
-    lineBuffer += chunk.toString();
-
-    // Process complete lines
-    const lines = lineBuffer.split('\n');
-    lineBuffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-    for (const line of lines) {
-      if (line.trim()) {
-        lastTranscribedText = line;
-        resetSilenceTimer();
-        // Call callback for each line with final=false (skip if muted or suppressed)
-        if (currentCallback && !isHearMuted() && !suppressCallbacks) {
-          currentCallback(correctText(line, false), stopListening, false);
-        }
-      }
-    }
+    handleLine(chunk);
   });
 
   proc.on('exit', () => {

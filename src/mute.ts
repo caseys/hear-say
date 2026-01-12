@@ -1,19 +1,17 @@
+import { createListenerRegistry } from './listeners.js';
+
 let hearMuted = false;
 
 // Mute state change listeners
 type MuteListener = (muted: boolean) => void;
-const listeners: MuteListener[] = [];
+const listeners = createListenerRegistry<[boolean]>();
 
 /**
  * Register a listener for mute state changes.
  * Returns an unregister function.
  */
 export function onMuteChange(listener: MuteListener): () => void {
-  listeners.push(listener);
-  return () => {
-    const index = listeners.indexOf(listener);
-    if (index !== -1) listeners.splice(index, 1);
-  };
+  return listeners.on(listener);
 }
 
 /**
@@ -24,9 +22,7 @@ export function onMuteChange(listener: MuteListener): () => void {
  */
 export function setHearMuted(enabled: boolean): void {
   hearMuted = enabled;
-  for (const listener of listeners) {
-    listener(enabled);
-  }
+  listeners.emit(enabled);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { killProcess, debug as debugLog } from './utilities.js';
+import { createListenerRegistry } from './listeners.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[say]', ...arguments_);
@@ -11,10 +12,18 @@ let speaking: boolean = false;
 let repeatReductionEnabled: boolean = true;
 
 // Event listeners (supports multiple)
-const startListeners: Array<() => void> = [];
-const finishListeners: Array<() => void> = [];
-const gapStartListeners: Array<() => void> = [];
-const gapEndListeners: Array<() => void> = [];
+const startListeners = createListenerRegistry<[]>({
+  onError: (error) => debug('emitStart error:', error),
+});
+const finishListeners = createListenerRegistry<[]>({
+  onError: (error) => debug('emitFinish error:', error),
+});
+const gapStartListeners = createListenerRegistry<[]>({
+  onError: (error) => debug('emitGapStart error:', error),
+});
+const gapEndListeners = createListenerRegistry<[]>({
+  onError: (error) => debug('emitGapEnd error:', error),
+});
 
 // Gap configuration (pause between queue items to allow hearing) - SAY_QUEUE_BREAK in seconds
 let gapDuration = (Number(process.env.SAY_QUEUE_BREAK) || 2) * 1000;
@@ -163,28 +172,20 @@ function reduceRepetition(newText: string, lastText: string): string | undefined
 }
 
 function emitStart(): void {
-  for (const listener of startListeners) {
-    try { listener(); } catch (error) { debug('emitStart error:', error); }
-  }
+  startListeners.emit();
 }
 
 function emitFinish(): void {
-  for (const listener of finishListeners) {
-    try { listener(); } catch (error) { debug('emitFinish error:', error); }
-  }
+  finishListeners.emit();
 }
 
 function emitGapStart(): void {
-  for (const listener of gapStartListeners) {
-    try { listener(); } catch (error) { debug('emitGapStart error:', error); }
-  }
+  gapStartListeners.emit();
 }
 
 function emitGapEnd(): void {
   gapCompletionResolver = undefined;
-  for (const listener of gapEndListeners) {
-    try { listener(); } catch (error) { debug('emitGapEnd error:', error); }
-  }
+  gapEndListeners.emit();
 }
 
 /**
@@ -254,7 +255,7 @@ function speakOne(text: string): Promise<void> {
  * Resolves when either gapDuration passes or speech is detected and completed.
  */
 async function waitForGap(): Promise<void> {
-  if (gapDuration <= 0 || gapStartListeners.length === 0) return;
+  if (gapDuration <= 0 || gapStartListeners.count() === 0) return;
 
   emitGapStart();
 
@@ -562,13 +563,7 @@ export function getSayStatus(): {
  * Returns a function to unregister the listener.
  */
 export function onSayStarted(callback: () => void): () => void {
-  startListeners.push(callback);
-  return () => {
-    const index = startListeners.indexOf(callback);
-    if (index !== -1) {
-      startListeners.splice(index, 1);
-    }
-  };
+  return startListeners.on(callback);
 }
 
 /**
@@ -576,13 +571,7 @@ export function onSayStarted(callback: () => void): () => void {
  * Returns a function to unregister the listener.
  */
 export function onSayFinished(callback: () => void): () => void {
-  finishListeners.push(callback);
-  return () => {
-    const index = finishListeners.indexOf(callback);
-    if (index !== -1) {
-      finishListeners.splice(index, 1);
-    }
-  };
+  return finishListeners.on(callback);
 }
 
 /**
@@ -591,13 +580,7 @@ export function onSayFinished(callback: () => void): () => void {
  * Returns a function to unregister the listener.
  */
 export function onSayGapStart(callback: () => void): () => void {
-  gapStartListeners.push(callback);
-  return () => {
-    const index = gapStartListeners.indexOf(callback);
-    if (index !== -1) {
-      gapStartListeners.splice(index, 1);
-    }
-  };
+  return gapStartListeners.on(callback);
 }
 
 /**
@@ -605,13 +588,7 @@ export function onSayGapStart(callback: () => void): () => void {
  * Returns a function to unregister the listener.
  */
 export function onSayGapEnd(callback: () => void): () => void {
-  gapEndListeners.push(callback);
-  return () => {
-    const index = gapEndListeners.indexOf(callback);
-    if (index !== -1) {
-      gapEndListeners.splice(index, 1);
-    }
-  };
+  return gapEndListeners.on(callback);
 }
 
 /**

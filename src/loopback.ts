@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { say } from './say.js';
 import { killProcess } from './utilities.js';
+import { createLineParser } from './line-parser.js';
 
 /**
  * Speak text via TTS and return what STT transcribes.
@@ -72,21 +73,13 @@ export async function loopback(
       }
     };
 
-    // Process hear output
-    let lineBuffer = '';
-    hearProcess.stdout!.on('data', (chunk: Buffer) => {
-      lineBuffer += chunk.toString();
-      const lines = lineBuffer.split('\n');
-      lineBuffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.trim()) {
-          lastTranscribedText = line;
-          resetSilenceTimer();
-          onLine?.(line, false);
-        }
-      }
+    const handleLine = createLineParser((line) => {
+      lastTranscribedText = line;
+      resetSilenceTimer();
+      onLine?.(line, false);
     });
+
+    hearProcess.stdout!.on('data', handleLine);
 
     hearProcess.on('exit', () => {
       // If hear exits unexpectedly, return what we have

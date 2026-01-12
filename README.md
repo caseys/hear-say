@@ -80,7 +80,7 @@ hear((text, stop, final) => {
     console.log("Streaming:", text);
     // Real-time updates as speech is recognized
   }
-}, 1600);  // 1600ms silence timeout (default: 1200)
+}, 1600);  // 1600ms silence timeout (default: 2500)
 
 hear(false);  // stop listening
 ```
@@ -134,11 +134,13 @@ Environment variables to customize behavior:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VOICE` | (system default) | macOS voice name (e.g., "Samantha", "Alex") |
-| `MIN_RATE` | 230 | Minimum speech rate in words per minute |
-| `MAX_RATE` | 370 | Maximum speech rate (used when queue is long) |
-| `WORD_QUEUE_PLATEAU` | 15 | Words in queue to reach max rate |
+| `MIN_RATE` | 200 | Minimum speech rate in words per minute |
+| `MAX_RATE` | 300 | Maximum speech rate (used when queue is long) |
+| `WORD_QUEUE_PLATEAU` | 50 | Words in queue to reach max rate |
 | `SAY_QUEUE_BREAK` | 2 | Gap between queue items in seconds (allows hearing) |
-| `HEAR_SAY_DEBUG` | (off) | Set to "1" to enable debug logging |
+| `HEAR_SAY_DEBUG_LOG` | `/tmp/hear-say-debug.log` | Path for debug log file |
+
+Debug logs are written to the file at `HEAR_SAY_DEBUG_LOG`.
 
 Example:
 ```bash
@@ -153,10 +155,11 @@ Additional exports for advanced use cases:
 import {
   getLastSpoken,
   isSpeaking,
-  setDebug,
+  getSayStatus,
   setRepeatReduction,
   setHearMuted,
   isHearMuted,
+  onMuteChange,
   setGapDuration,
   onSayStarted,
   onSayFinished,
@@ -166,13 +169,13 @@ import {
 } from 'hear-say';
 ```
 
-### State & Debug
+### State
 
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `getLastSpoken()` | `string` | The last text that was spoken |
 | `isSpeaking()` | `boolean` | Whether TTS is currently active |
-| `setDebug(enabled)` | `void` | Enable/disable debug logging at runtime |
+| `getSayStatus()` | `object` | Internal say() queue state for debugging |
 | `setRepeatReduction(enabled)` | `void` | Enable/disable repeat reduction (default: on) |
 | `setHearMuted(enabled)` | `void` | Mute/unmute hear() callbacks |
 | `isHearMuted()` | `boolean` | Whether hear() is currently muted |
@@ -183,18 +186,6 @@ import {
 say("Processing file: 1 of 100")  // speaks full text
 say("Processing file: 2 of 100")  // speaks "2"
 say("Processing file: 2 of 100")  // skipped (duplicate)
-```
-
-```ts
-import { setDebug } from 'hear-say';
-
-// Enable debug logging (same as HEAR_SAY_DEBUG=1)
-setDebug(true);
-
-// Tools can expose this to their users however they want
-if (args.verbose) {
-  setDebug(true);
-}
 ```
 
 ### Gap Control
@@ -208,7 +199,7 @@ Between each queued speech item, there's a configurable gap (default 2s) that al
 
 ### Events
 
-Register callbacks for speech lifecycle events. Each returns an unregister function.
+Register callbacks for state events. Each returns an unregister function.
 
 ```ts
 const unregister = onSayStarted(() => {
@@ -224,6 +215,7 @@ const unregister = onSayStarted(() => {
 | `onSayFinished(cb)` | Speech queue is empty |
 | `onSayGapStart(cb)` | Gap begins between queue items |
 | `onSayGapEnd(cb)` | Gap ends, speech resuming |
+| `onMuteChange(cb)` | Hear mute state changes (callback receives boolean) |
 
 
 ### Apple's Embedded Speech Commands
@@ -302,7 +294,7 @@ Dictionary terms with underscores or spaces are matched as phrases:
 ```ts
 setDictionary(['match_planes', 'rescue_kerbal']);
 
-correctText("match planes");  // -> "match_planes"
+correctText("match planes", true);  // -> "match_planes"
 ```
 
 #### Stopwords
@@ -312,6 +304,12 @@ Common English words (1,298 from stopwords-en) are skipped during correction to 
 #### Limitations
 
 The phonetic algorithms are English-specific (Double Metaphone, English syllabification rules). Multi-language support would require language detection and per-language phonetic encoders.
+
+## Development
+
+- `npm run lint` - Lint `src`
+- `npm run test` - Interactive end-to-end check (requires mic/speaker)
+- `npm run test:phonetic` - Unit test for phonetic tag preservation
 
 ## License
 
