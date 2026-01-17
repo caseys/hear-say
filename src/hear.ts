@@ -4,6 +4,7 @@ import { killProcess, debug as debugLog } from './utilities.js';
 import { isHearMuted, onMuteChange } from './mute.js';
 import { correctText } from './phonetic.js';
 import { createLineParser } from './line-parser.js';
+import { isSegpuncEnabled, processSegpunc } from './segpunc.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[hear]', ...arguments_);
@@ -110,7 +111,7 @@ function resetSilenceTimer(): void {
   }, timeoutDuration);
 }
 
-function onSilence(): void {
+async function onSilence(): Promise<void> {
   debug('[hear] onSilence: lastTranscribedText?', !!lastTranscribedText, 'currentCallback?', !!currentCallback, 'muted?', isHearMuted(), 'suppressed?', suppressCallbacks);
   // Only fire if we have accumulated text and a callback, and not suppressed
   if (!lastTranscribedText || !currentCallback || suppressCallbacks) {
@@ -139,8 +140,16 @@ function onSilence(): void {
     return;
   }
 
+  // Apply phonetic correction
+  let processedText = correctText(text, true);
+
+  // Apply segpunc processing (punctuation restoration + sentence segmentation)
+  if (isSegpuncEnabled()) {
+    processedText = await processSegpunc(processedText);
+  }
+
   // Invoke callback with final=true - new process is already spawning
-  callback(correctText(text, true), stopListening, true);
+  callback(processedText, stopListening, true);
 
   // If we're in a gap and speech was captured, signal completion
   if (inGap) {
@@ -178,7 +187,15 @@ function startListening(): void {
     lastTranscribedText = line;
     resetSilenceTimer();
     if (currentCallback && !isHearMuted() && !suppressCallbacks) {
-      currentCallback(correctText(line, false), stopListening, false);
+      const callback = currentCallback;
+      // Apply segpunc processing (async)
+      (async () => {
+        let processedText = correctText(line, false);
+        if (isSegpuncEnabled()) {
+          processedText = await processSegpunc(processedText);
+        }
+        callback(processedText, stopListening, false);
+      })();
     }
   });
 

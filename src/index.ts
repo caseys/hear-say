@@ -11,3 +11,4 @@ export { loopback } from './loopback.js';
 export { setHearMuted, isHearMuted, onMuteChange } from './mute.js';
 export { setDictionary, setPhoneticCorrection, benchmarkCorrection, correctText } from './phonetic.js';
 export type { DictionaryEntry, PhoneticCorrectionOptions } from './phonetic.js';
+export { warmSegpunc, setSegpuncEnabled, isSegpuncEnabled, splitSentences } from './segpunc.js';

@@ -52,6 +52,7 @@
     "darwin"
   ],
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "phonetics": "^1.0.5",
     "stopwords-en": "^0.3.0",
     "syllable": "^5.0.1"
