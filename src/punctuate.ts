@@ -39,13 +39,6 @@ export async function warmPunctuator(): Promise<void> {
   await getPunctuator();
 }
 
-/**
- * Check if the punctuator is loaded and ready.
- */
-export function isPunctuatorReady(): boolean {
-  return punctuator !== undefined;
-}
-
 // Map entity labels to punctuation characters
 const PUNCTUATION_MAP: Record<string, string> = {
   '0': '',
@@ -99,8 +92,8 @@ export async function restorePunctuation(text: string): Promise<string> {
   const wordPunctuation: (string | undefined)[] = Array.from({ length: words.length });
   let tokenIndex = 0;
 
-  for (let wordIndex = 0; wordIndex < words.length; wordIndex++) {
-    const word = words[wordIndex].toLowerCase();
+  for (const [wordIndex, word_] of words.entries()) {
+    const word = word_.toLowerCase();
     let accumulated = '';
 
     // Consume tokens until we've accumulated enough chars to match this word
@@ -116,7 +109,7 @@ export async function restorePunctuation(text: string): Promise<string> {
       // If this token has punctuation and it's the last token for this word, apply it
       if (p) {
         wordPunctuation[wordIndex] = p;
-        debug('word', wordIndex, `"${words[wordIndex]}"`, 'gets', p, 'from token', tokenWord);
+        debug('word', wordIndex, `"${word_}"`, 'gets', p, 'from token', tokenWord);
       }
 
       tokenIndex++;
@@ -124,7 +117,7 @@ export async function restorePunctuation(text: string): Promise<string> {
   }
 
   // Build result
-  let result = words.map((w, i) => w + (wordPunctuation[i] || '')).join(' ');
+  let result = words.map((w, index) => w + (wordPunctuation[index] || '')).join(' ');
 
   // Capitalize first letter
   if (result.length > 0) {

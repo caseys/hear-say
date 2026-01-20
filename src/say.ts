@@ -120,8 +120,15 @@ function reduceRepetition(newText: string, lastText: string): string | undefined
     }
   }
   // Extend prefix to include trailing punctuation/whitespace
+  // But don't include unit connectors (/ -) that precede word characters, to preserve units like "m/sec"
   if (prefixLength > 0) {
     while (prefixLength < newText.length && /[^\w]/.test(newText[prefixLength])) {
+      const charToExtend = newText[prefixLength];
+      const charAfter = newText[prefixLength + 1] || '';
+      // Don't extend if this is a connector preceding a word char (preserves "m/sec")
+      if (/[/-]/.test(charToExtend) && /\w/.test(charAfter)) {
+        break;
+      }
       prefixLength++;
     }
   }
@@ -151,8 +158,15 @@ function reduceRepetition(newText: string, lastText: string): string | undefined
     }
   }
   // Extend suffix to include leading punctuation/whitespace
+  // But don't include unit connectors (/ -) that follow word characters, to preserve units like "m/sec"
   if (suffixLength > 0) {
     while (suffixLength < newText.length - prefixLength && /[^\w]/.test(newText[newText.length - 1 - suffixLength])) {
+      const charToExtend = newText[newText.length - 1 - suffixLength];
+      const charBefore = newText[newText.length - 2 - suffixLength] || '';
+      // Don't extend if this is a connector following a word char (preserves "m/sec")
+      if (/[/-]/.test(charToExtend) && /\w/.test(charBefore)) {
+        break;
+      }
       suffixLength++;
     }
   }

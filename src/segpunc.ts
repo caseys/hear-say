@@ -1,6 +1,6 @@
 import { debug as debugLog } from './utilities.js';
 import { splitSentences } from './segment.js';
-import { restorePunctuation, warmPunctuator, isPunctuatorReady } from './punctuate.js';
+import { restorePunctuation, warmPunctuator } from './punctuate.js';
 
 function debug(...arguments_: unknown[]): void {
   debugLog('[segpunc]', ...arguments_);
@@ -74,11 +74,11 @@ export async function processSegpunc(text: string): Promise<string> {
   }
 
   // Full processing for longer input
-  let processed = await restorePunctuation(text);
+  const processed = await restorePunctuation(text);
   debug('punctuated:', processed);
 
   // Split into sentences, capitalize each, then rejoin
-  const sentences = splitSentences(processed).map(capitalizeFirst);
+  const sentences = splitSentences(processed).map((s) => capitalizeFirst(s));
   if (sentences.length > 1) {
     debug('sentences:', sentences);
   }
@@ -91,4 +91,3 @@ export async function processSegpunc(text: string): Promise<string> {
 
 // Re-export utilities for public API
 export { splitSentences } from './segment.js';
-export { warmPunctuator } from './punctuate.js';
