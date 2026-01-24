@@ -11,13 +11,13 @@ Minimal macOS TypeScript glue on top of Apple’s `say` (TTS) and the [`hear`](h
 
 Claude did most of the work here - it's a bit messy, but solid and fast.
 
-## Philosophy
+## Hack Warning
 
 This project leans on Apple’s built‑in STT/TTS stack—30+ years of MacinTalk heritage, fast, tiny, and surprisingly good on older hardware. The library is a pragmatic “hack on top” of the `say` CLI and the `hear` CLI, with a small queue, tags, and glue to make them feel like an API.
 
 Credit: `hear` is by Sveinbjörn Þórðarson (see https://sveinbjorn.org/hear).
 
-## Features (high level)
+## Features
 
 - **Say queue** with automatic rate control as the queue grows.
 - **Interrupt modes** for `say`: polite interrupt, clear queue, rude cut‑off, “latest wins.”
@@ -66,6 +66,10 @@ Support other minimal, low‑resource engines with similar ergonomics:
 - Windows: `System.Speech` and `Windows.Media.Speech*`
 - iOS/macOS: `AVSpeechSynthesizer`
 - Cross‑platform: `Pocket‑TTS` (https://github.com/kyutai-labs/pocket-tts)
+
+## Why
+
+I created this to use with an MCP service for Kerbal Space Program get that 2001-Hal-like experience.
 
 ## License
 
