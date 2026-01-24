@@ -1,5 +1,5 @@
 {
-  "name": "@caseys/hear-say",
+  "name": "@caseys-npm/hear-say",
   "version": "0.4.0",
   "description": "macOS text-to-speech and speech-to-text library wrapping say and hear CLI",
   "type": "module",
