@@ -69,7 +69,7 @@ Support other minimal, low‑resource engines with similar ergonomics:
 
 ## Why
 
-I created this to use with an MCP service for Kerbal Space Program get that 2001-Hal-like experience.
+I created this to use with an MCP service for Kerbal Space Program... to get that 2001-Hal-like experience.
 
 ## License
 
