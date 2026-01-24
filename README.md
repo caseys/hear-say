@@ -29,7 +29,7 @@ Credit: `hear` is by Sveinbjörn Þórðarson (see https://sveinbjorn.org/hear).
 
 ```bash
 brew install hear
-npm install hear-say
+npm install @caseys/hear-say
 ```
 
 Requires Node.js 18+ and macOS.
@@ -37,7 +37,7 @@ Requires Node.js 18+ and macOS.
 ## Usage
 
 ```ts
-import { say, hear, loopback, setDictionary } from 'hear-say';
+import { say, hear, loopback, setDictionary } from '@caseys/hear-say';
 
 // say(): queued TTS
 await say('Hello');
